@@ -220,25 +220,71 @@ def calibrate(example_inputs, module: torch.fx.GraphModule, tokenizer_model_path
         next_token = torch.multinomial(probs_sort, num_samples=1)
         return probs_indices.gather(dim=-1, index=next_token)
 
+    device = torch.device("cuda")
+    module = module.to(device)
+    atten_mask = atten_mask.to(device)
+    k_caches = [c.to(device) for c in k_caches]
+    v_caches = [c.to(device) for c in v_caches]
+
+    class post(torch.nn.Module):
+
+        def forward(self, logits, k_caches, v_caches, new_k_caches, new_v_caches, atten_mask, pos):
+            k_caches = torch.stack(k_caches)
+            v_caches = torch.stack(v_caches)
+            new_k_caches = torch.stack(new_k_caches)
+            new_v_caches = torch.stack(new_v_caches)
+
+            k_caches = torch.roll(k_caches, -1, -1)
+            v_caches = torch.roll(v_caches, -1, 2)
+            #breakpoint()
+            k_caches[:, :, :, -1:] = new_k_caches
+            v_caches[:, :, -1:, :] = new_v_caches
+
+
+            #k_caches = [torch.roll(k_cache, -1, -1) for k_cache in k_caches]
+            #v_caches = [torch.roll(v_cache, -1, 1) for v_cache in v_caches]
+            #for i, k_cache in enumerate(k_caches):
+            #    k_cache[:, :, -1:] = new_k_caches[i]
+            #    v_caches[i][:, -1:, :] = new_v_caches[i]
+
+            #k_caches = [torch.cat([k_cache[:, :, 1:], new_k_caches[i]], dim=-1) for i, k_cache in enumerate(k_caches)]
+            #v_caches = [torch.cat([v_cache[:, 1:, :], new_v_caches[i]], dim=1) for i, v_cache in enumerate(v_caches)]
+            #breakpoint()
+            pos += 1
+            atten_mask[0][-pos - 1] = 0
+            result = torch.argmax(logits[:, -1], dim=-1)
+
+            return pos, atten_mask, result, list(k_caches), list(v_caches)
+
+    post_net = post().to(device)
+
     with torch.no_grad():
+        pos_tensor = torch.full((1, 1), pos, device=device)
         while token_list[-1] != sp_model.eos_id() and pos < 128:
             logits, new_k_caches, new_v_caches = module(
-                torch.full((1, 1), token_list[pos]),
-                torch.full((1, 1), pos),
+                torch.full((1, 1), token_list[pos], device=device),
+                pos_tensor,
                 atten_mask,
                 *k_caches,
                 *v_caches,
             )
-            k_caches = [torch.cat([k_cache[:, :, 1:], new_k_caches[i]], dim=-1) for i, k_cache in enumerate(k_caches)]
-            v_caches = [torch.cat([v_cache[:, 1:, :], new_v_caches[i]], dim=1) for i, v_cache in enumerate(v_caches)]
 
-            pos += 1
-            atten_mask[0][-pos - 1] = 0
+            #k_caches = [torch.cat([k_cache[:, :, 1:], new_k_caches[i]], dim=-1) for i, k_cache in enumerate(k_caches)]
+            #v_caches = [torch.cat([v_cache[:, 1:, :], new_v_caches[i]], dim=1) for i, v_cache in enumerate(v_caches)]
+
+            #pos += 1
+            #atten_mask[0][-pos - 1] = 0
+
+            pos_tensor, atten_mask, result, k_caches, v_caches = post_net(
+                logits, k_caches, v_caches, new_k_caches, new_v_caches, atten_mask, pos_tensor)
+            pos = pos_tensor.item()
             if pos >= len(token_list):
+                print(f"Runing pos={pos}")
                 #probs = torch.softmax(logits[:, -1] / 0.8, dim=-1)
                 #token_list.append(sample_top_p(probs, 0.9).item())
                 # temporature=0
-                token_list.append(torch.argmax(logits[:, -1], dim=-1).item())
+                #token_list.append(torch.argmax(logits[:, -1], dim=-1).item())
+                token_list.append(result.item())
 
     print(f"calibration data:\n{sp_model.decode(token_list)}")
 
@@ -288,6 +334,19 @@ class SingleLlama:
                         a.meta[q_io_key] = kv_type
 
     def quantize(self, quant_dtype, custom_annotations=()):
+        import time
+
+        print("run the model...")
+        start = time.time()
+        calibrate(
+            self.get_example_inputs(),
+            self.split_modules[0],
+            self._args.tokenizer_model,
+        )
+        end = time.time()
+        print(f"run takes {end - start}")
+        sys.exit(0)
+
         self.quant_dtype = quant_dtype
         quantizer = QnnQuantizer()
         quantizer.set_per_channel_linear_quant(True)
@@ -315,22 +374,29 @@ class SingleLlama:
                 )
                 fx_graph_module = prepare_pt2e(fx_graph_module, quantizer)
                 split_fx_graph_modules.append(fx_graph_module)
+
         print("Quantizing the model...")
+        start = time.time()
         calibrate(
             self.get_example_inputs(),
             split_fx_graph_modules[0],
             self._args.tokenizer_model,
         )
+        end = time.time()
+        print(f"Quantize takes {end - start}")
 
         self.split_modules = [
             convert_pt2e(fx_graph_module) for fx_graph_module in split_fx_graph_modules
         ]
         print("Running quantized eager model....")
+        start = time.time()
         calibrate(
             self.get_example_inputs(),
             self.split_modules[0],
             self._args.tokenizer_model,
         )
+        end = time.time()
+        print(f"QDQ takes {end - start}")
         del self.llama_model
 
     def lowering_modules(self, work_space, kv_type=torch.float32):

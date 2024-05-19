@@ -62,7 +62,7 @@ done
 NIGHTLY_VERSION=dev20240507
 
 # The pip repository that hosts nightly torch packages.
-TORCH_NIGHTLY_URL="https://download.pytorch.org/whl/nightly/cpu"
+TORCH_NIGHTLY_URL="https://download.pytorch.org/whl/nightly/cu121"
 
 # pip packages needed by exir.
 EXIR_REQUIREMENTS=(
