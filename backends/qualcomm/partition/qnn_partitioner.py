@@ -23,7 +23,7 @@ from executorch.exir.backend.partitioner import (
     Partitioner,
     PartitionResult,
 )
-from executorch.exir.backend.utils import tag_constant_data
+from executorch.exir.backend.utils import tag_constant_data, tag_mutated_buffer
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupportBase
 
@@ -103,6 +103,7 @@ class QnnPartitioner(Partitioner):
         compiler_specs: List[CompileSpec],
         skip_node_id_set: set = None,
         skip_node_op_set: set = None,
+        skip_mutable_buffer: bool = True,
     ):
         self.compiler_specs_snapshot = copy.deepcopy(compiler_specs)
 
@@ -112,6 +113,7 @@ class QnnPartitioner(Partitioner):
         self.partition_tags: Dict[str, DelegationSpec] = {}
         self.skip_node_id_set = set() if skip_node_id_set is None else skip_node_id_set
         self.skip_node_op_set = set() if skip_node_op_set is None else skip_node_op_set
+        self.skip_mutable_buffer = skip_mutable_buffer
 
     def generate_partitions(
         self, edge_program: torch.export.ExportedProgram
@@ -157,6 +159,8 @@ class QnnPartitioner(Partitioner):
         if len(partitions) != 0:
             self.tag_nodes(partitions, edge_program)
             tag_constant_data(edge_program)
+            if not self.skip_mutable_buffer:
+                tag_mutated_buffer(edge_program)
         for node in edge_program.graph_module.graph.nodes:
             if hasattr(node, "meta"):
                 # pop certain keys in meta for not affecting the passes in compilation
