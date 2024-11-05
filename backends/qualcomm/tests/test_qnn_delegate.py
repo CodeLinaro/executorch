@@ -33,6 +33,7 @@ from executorch.backends.qualcomm.utils.utils import (
     capture_program,
     from_context_binary,
     generate_htp_compiler_spec,
+    generate_multi_graph_prog,
     generate_qnn_executorch_compiler_spec,
     skip_annotation,
 )
@@ -1564,6 +1565,44 @@ class TestQNNFloatingPointUtils(TestQNN):
         exec_prog = edge_prog.to_executorch()
         self.verify_output(module.get_reference_module(), sample_input, exec_prog)
 
+    def test_qnn_backend_multi_graphs(self):
+        seq_conv = Conv2dSequential()  # noqa: F405
+        # weight sharing
+        modules = [seq_conv, seq_conv.second]
+        sample_inputs = [(torch.randn([1, 1, 3, 3]),), (torch.randn([1, 3, 3, 3]),)]
+        graph_names = ["seq_conv", "single_conv"]
+        edge_progs = [
+            capture_program(module, sample_input)
+            for module, sample_input in zip(modules, sample_inputs)
+        ]
+        backend_options = generate_htp_compiler_spec(
+            use_fp16=True,
+        )
+        compiler_specs = [
+            generate_qnn_executorch_compiler_spec(
+                soc_model=self.chipset_table[TestQNN.model],
+                backend_options=backend_options,
+                multiple_graphs=True,
+                graph_name=graph_name,
+            )
+            for graph_name in graph_names
+        ]
+        exported_programs = [
+            to_backend(edge_prog.exported_program, QnnPartitioner(compiler_specs[i]))
+            for i, edge_prog in enumerate(edge_progs)
+        ]
+        prog_mgr = generate_multi_graph_prog(
+            compiler_specs=compiler_specs[0],
+            exported_programs=exported_programs,
+        )
+        for index, module in enumerate(modules):
+            self.verify_output(
+                module=module,
+                sample_inputs=sample_inputs[index],
+                executorch_prog=prog_mgr,
+                method_index=index,
+            )
+
     def test_qnn_backend_profile_op(self):
         TestQNN.enable_profile = True
         backend_options = generate_htp_compiler_spec(use_fp16=True)
@@ -1847,6 +1886,44 @@ class TestQNNQuantizedUtils(TestQNN):
         canonicalize_program(edge_prog.exported_program())
         exec_prog = edge_prog.to_executorch()
         self.verify_output(module.get_reference_module(), sample_input, exec_prog)
+
+    def test_qnn_backend_multi_graphs(self):
+        seq_conv = Conv2dSequential()  # noqa: F405
+        # weight sharing
+        modules = [seq_conv, seq_conv.second]
+        sample_inputs = [(torch.randn([1, 1, 3, 3]),), (torch.randn([1, 3, 3, 3]),)]
+        graph_names = ["seq_conv", "single_conv"]
+        edge_progs = [
+            capture_program(self.get_qdq_module(module, sample_input), sample_input)
+            for module, sample_input in zip(modules, sample_inputs)
+        ]
+        backend_options = generate_htp_compiler_spec(
+            use_fp16=True,
+        )
+        compiler_specs = [
+            generate_qnn_executorch_compiler_spec(
+                soc_model=self.chipset_table[TestQNN.model],
+                backend_options=backend_options,
+                multiple_graphs=True,
+                graph_name=graph_name,
+            )
+            for graph_name in graph_names
+        ]
+        exported_programs = [
+            to_backend(edge_prog.exported_program, QnnPartitioner(compiler_specs[i]))
+            for i, edge_prog in enumerate(edge_progs)
+        ]
+        prog_mgr = generate_multi_graph_prog(
+            compiler_specs=compiler_specs[0],
+            exported_programs=exported_programs,
+        )
+        for index, module in enumerate(modules):
+            self.verify_output(
+                module=module,
+                sample_inputs=sample_inputs[index],
+                executorch_prog=prog_mgr,
+                method_index=index,
+            )
 
     def test_qnn_backend_profile_op(self):
         TestQNN.enable_profile = True

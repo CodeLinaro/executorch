@@ -138,7 +138,7 @@ class SimpleADB:
             for file_name in files:
                 self._adb(["push", file_name, self.workspace])
 
-    def execute(self, custom_runner_cmd=None):
+    def execute(self, custom_runner_cmd=None, method_index=0):
         self._adb(["shell", f"mkdir -p {self.output_folder}"])
         # run the delegation
         if custom_runner_cmd is None:
@@ -155,6 +155,7 @@ class SimpleADB:
                         if self.dump_intermediate_outputs
                         else ""
                     ),
+                    f"--method_index {method_index}",
                 ]
             )
             qnn_executor_runner_cmds = " ".join(

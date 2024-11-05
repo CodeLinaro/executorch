@@ -47,20 +47,103 @@ class PyQnnManager {
     qnn_manager_ = std::make_shared<QnnManager>(
         qnn_executorch_options, qnn_executorch_context_binary_);
   }
+  // used for loading multiple graphs in qcir
+  explicit PyQnnManager(const py::bytes& buffer, const py::list& qcirs)
+      : qnn_executorch_option_ptr_(buffer) {
+    auto qnn_executorch_options = GetQnnExecuTorchOptions(
+        qnn_executorch_option_ptr_.cast<std::string_view>().data());
+
+    // merge multiple qcirs into one context with multiple graphs
+    std::vector<flatbuffers::Offset<qcir::Graph>> graphs;
+    for (size_t i = 0; i < qcirs.size(); ++i) {
+      py::buffer_info info(py::buffer(qcirs[i].cast<py::bytes>()).request());
+      flatbuffers::Verifier verifier(
+          static_cast<const uint8_t* const>(info.ptr),
+          info.size * info.itemsize);
+
+      if (!qcir::VerifyContextBuffer(verifier)) {
+        QNN_EXECUTORCH_LOG_ERROR("Fail to verify qcir format");
+        return;
+      }
+      auto context = qcir::GetContext(info.ptr);
+      for (const auto& graph : *context->graphs()) {
+        std::vector<flatbuffers::Offset<qcir::Tensor>> tensors;
+        for (const auto tensor : *graph->tensors()) {
+          // here we need to take a detour to merge multiple qcir flatbuffers
+          // outer ToTensor
+          //   return: flatbuffers::Offset<Tensor>
+          //   consume: QnnTensor, flatbuffers::FlatBufferBuilder*
+          // inner ToTensor
+          //   return: QnnTensor
+          //   consume: flatbuffers::Vector<::flatbuffers::Offset<qcir::Tensor>>
+          tensors.emplace_back(ToTensor(ToTensor(tensor), &builder_));
+        }
+        std::vector<flatbuffers::Offset<qcir::Operator>> nodes;
+        for (const auto& node : *graph->nodes()) {
+          int32_t* inputs_ptr = const_cast<int32_t*>(node->inputs()->data());
+          int32_t* outputs_ptr = const_cast<int32_t*>(node->outputs()->data());
+          int32_t* params_ptr = const_cast<int32_t*>(node->params()->data());
+          std::vector<int32_t> inputs(
+              inputs_ptr, inputs_ptr + node->inputs()->size());
+          std::vector<int32_t> outputs(
+              outputs_ptr, outputs_ptr + node->outputs()->size());
+          std::vector<int32_t> params(
+              params_ptr, params_ptr + node->params()->size());
+          nodes.emplace_back(qcir::CreateOperatorDirect(
+              builder_,
+              node->name()->str().c_str(),
+              node->package_name()->str().c_str(),
+              node->type_name()->str().c_str(),
+              &inputs,
+              &outputs,
+              &params));
+        }
+        graphs.emplace_back(qcir::CreateGraphDirect(
+            builder_, graph->name()->str().c_str(), &nodes, &tensors));
+      }
+    }
+    auto context = qcir::CreateContextDirect(builder_, &graphs);
+    builder_.Finish(context);
+    qnn_executorch_context_binary_.buffer = builder_.GetBufferPointer();
+    qnn_executorch_context_binary_.nbytes = builder_.GetSize();
+    qnn_manager_ = std::make_shared<QnnManager>(
+        qnn_executorch_options, qnn_executorch_context_binary_);
+  }
 
   executorch::runtime::Error Init() {
     return qnn_manager_->Init();
   }
+
   bool IsNodeSupportedByBackend(
       std::vector<std::shared_ptr<OpWrapper>>& op_wrappers) {
     return qnn_manager_->IsNodeSupportedByBackend(op_wrappers);
   }
+
+  // this method is specific for compiling multi-graphs
+  py::array_t<char> Compile() {
+    if (qnn_manager_->CompileQcir() != Error::Ok) {
+      QNN_EXECUTORCH_LOG_ERROR("Fail to compile qcir");
+      return py::array_t<char>(0);
+    }
+
+    // generate context binary if compilation succeded
+    QnnExecuTorchContextBinary context_binary;
+    qnn_manager_->GetContextBinary(context_binary);
+    // allocate py::array (to pass the result of the C++ function to Python)
+    auto result = py::array_t<char>(context_binary.nbytes);
+    auto result_buffer = result.request();
+    char* result_ptr = (char*)result_buffer.ptr;
+    std::memcpy(result_ptr, context_binary.buffer, context_binary.nbytes);
+    return result;
+  }
+
   py::array_t<char> Compile(
+      const std::string& graph_name,
       std::vector<std::shared_ptr<OpWrapper>>& op_wrappers) {
     QnnExecuTorchContextBinary context_binary;
     flatbuffers::FlatBufferBuilder builder;
 
-    if (qnn_manager_->IsOnlinePrepare()) {
+    if (qnn_manager_->IsOnlinePrepare() || qnn_manager_->IsMultipleGraphs()) {
       std::vector<flatbuffers::Offset<qcir::Tensor>> tensors;
       std::unordered_map<void*, int> tensor_map;
 
@@ -126,14 +209,19 @@ class PyQnnManager {
             &outputs,
             &params));
       }
-      auto graph = qcir::CreateGraphDirect(builder, &operators, &tensors);
-      builder.Finish(graph);
+      auto graph = qcir::CreateGraphDirect(
+          builder, graph_name.c_str(), &operators, &tensors);
+      std::vector<flatbuffers::Offset<qcir::Graph>> graphs({graph});
+      auto context = qcir::CreateContextDirect(builder, &graphs);
+      builder.Finish(context);
       context_binary.buffer = builder.GetBufferPointer();
       context_binary.nbytes = builder.GetSize();
-    } else if (
-        qnn_manager_->Compile(op_wrappers, context_binary) !=
-        executorch::runtime::Error::Ok) {
-      return py::array_t<char>(0);
+    } else {
+      if (qnn_manager_->Compile(graph_name, op_wrappers) !=
+          executorch::runtime::Error::Ok) {
+        return py::array_t<char>(0);
+      }
+      qnn_manager_->GetContextBinary(context_binary);
     }
 
     // allocate py::array (to pass the result of the C++ function to
@@ -144,6 +232,7 @@ class PyQnnManager {
     std::memcpy(result_ptr, context_binary.buffer, context_binary.nbytes);
     return result;
   }
+
   void Destroy() {
     return qnn_manager_->Destroy();
   }
@@ -156,24 +245,32 @@ class PyQnnManager {
     return qnn_manager_->IsTensorDump();
   }
 
-  executorch::runtime::Error AllocateTensor() {
-    return qnn_manager_->AllocateTensor();
+  executorch::runtime::Error AllocateTensor(const std::string& graph_name) {
+    return qnn_manager_->AllocateTensor(graph_name);
   }
 
-  py::list GetGraphInputs() {
+  py::list GetGraphInputs(const std::string& graph_name) {
     py::list ret;
     for (const std::shared_ptr<TensorWrapper>& input :
-         qnn_manager_->GetGraphInputs()) {
+         qnn_manager_->GetGraphInputs(graph_name)) {
       ret.append(PyQnnTensorWrapper(input));
     }
     return ret;
   }
 
-  py::list GetGraphOutputs() {
+  py::list GetGraphOutputs(const std::string& graph_name) {
     py::list ret;
     for (const std::shared_ptr<TensorWrapper>& output :
-         qnn_manager_->GetGraphOutputs()) {
+         qnn_manager_->GetGraphOutputs(graph_name)) {
       ret.append(PyQnnTensorWrapper(output));
+    }
+    return ret;
+  }
+
+  py::list GetGraphNames() {
+    py::list ret;
+    for (const std::string& graph_name : qnn_manager_->GetGraphNames()) {
+      ret.append(graph_name);
     }
     return ret;
   }
@@ -188,6 +285,7 @@ class PyQnnManager {
   const py::bytes qnn_executorch_option_ptr_;
   QnnExecuTorchContextBinary qnn_executorch_context_binary_;
   std::shared_ptr<QnnManager> qnn_manager_;
+  flatbuffers::FlatBufferBuilder builder_;
 };
 } // namespace qnn
 } // namespace backends

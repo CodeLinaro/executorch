@@ -11,6 +11,9 @@
 #include <executorch/runtime/core/error.h>
 #include <executorch/runtime/core/evalue.h>
 
+#include <mutex>
+#include <unordered_map>
+
 namespace executorch {
 namespace backends {
 namespace qnn {
@@ -34,6 +37,20 @@ class QnnExecuTorchBackend final
   void destroy(executorch::runtime::DelegateHandle* handle) const override;
 
   bool is_available() const override;
+
+ private:
+  static void add_cached_delegate(
+      uint32_t hash_val,
+      executorch::runtime::DelegateHandle* handle);
+  static void erase_cached_delegate(
+      executorch::runtime::DelegateHandle* handle);
+
+  static std::mutex mutex_;
+  static std::unordered_map<uint32_t, executorch::runtime::DelegateHandle*>
+      delegate_map_;
+  static std::unordered_map<executorch::runtime::DelegateHandle*, uint32_t>
+      delegate_map_rev_;
+  mutable std::string method_name_;
 };
 
 } // namespace qnn

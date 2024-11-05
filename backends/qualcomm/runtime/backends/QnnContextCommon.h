@@ -36,15 +36,15 @@ class QnnContext {
     return handle_;
   }
 
-  std::string GetGraphName() {
-    return cache_->GetGraphName();
+  std::vector<std::string> GetGraphNames() {
+    return cache_->GetGraphNames();
   }
 
-  std::vector<Qnn_Tensor_t> GetGraphInputs() {
-    return cache_->GetGraphInputs();
+  std::vector<Qnn_Tensor_t> GetGraphInputs(const std::string& graph_name) {
+    return cache_->GetGraphInputs(graph_name);
   }
-  std::vector<Qnn_Tensor_t> GetGraphOutputs() {
-    return cache_->GetGraphOutputs();
+  std::vector<Qnn_Tensor_t> GetGraphOutputs(const std::string& graph_name) {
+    return cache_->GetGraphOutputs(graph_name);
   }
   QnnBackendCache::CacheState GetCacheState() const {
     return cache_->GetCacheState();

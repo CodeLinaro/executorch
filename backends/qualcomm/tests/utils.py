@@ -185,6 +185,7 @@ class TestQNN(unittest.TestCase):
         etrecord_path: str = "etrecord.bin",
         expected_profile_events: int = -1,
         expected_intermediate_events: int = -1,
+        method_index: int = 0,
     ):
         with tempfile.TemporaryDirectory() as tmp_dir:
             buffer = (
@@ -258,6 +259,8 @@ class TestQNN(unittest.TestCase):
                     f"{tmp_dir}/input_list.txt",
                     "--output_folder_path",
                     f"{output_dir}",
+                    "--method_index",
+                    method_index,
                 ]
                 if expected_intermediate_events != -1:
                     cmd.append("--dump_intermediate_outputs")
@@ -305,7 +308,7 @@ class TestQNN(unittest.TestCase):
                     ),
                 )
                 adb.push(inputs=[sample_inputs], input_list=input_list)
-                adb.execute()
+                adb.execute(method_index=method_index)
                 adb.pull(output_path=tmp_dir, callback=post_process)
                 self._assert_outputs_equal(outputs, ref_outputs)
 

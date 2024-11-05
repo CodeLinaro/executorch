@@ -50,6 +50,7 @@ DEFINE_bool(
     shared_buffer,
     false,
     "Specifies to use shared buffers for zero-copy usecase between the application and device/co-processor associated with the backend.");
+DEFINE_uint32(method_index, 0, "Index of methods to be specified.");
 
 DEFINE_string(
     etdump_path,
@@ -156,10 +157,11 @@ int main(int argc, char** argv) {
   }
   ET_LOG(Info, "Model file %s is loaded.", model_path);
 
-  // Use the first method in the program.
+  // Use the designated method in the program, default to the first one
   const char* method_name = nullptr;
   {
-    const auto method_name_result = program->get_method_name(0);
+    const auto method_name_result =
+        program->get_method_name(FLAGS_method_index);
     ET_CHECK_MSG(method_name_result.ok(), "Program has no methods");
     method_name = *method_name_result;
   }
