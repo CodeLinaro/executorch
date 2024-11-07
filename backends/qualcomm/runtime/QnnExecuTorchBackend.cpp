@@ -7,37 +7,13 @@
  */
 
 #include <executorch/backends/qualcomm/aot/wrappers/TensorWrapper.h>
+#include <executorch/backends/qualcomm/qc_compiler_spec_generated.h>
 #include <executorch/backends/qualcomm/runtime/QnnExecuTorchBackend.h>
 #include <executorch/backends/qualcomm/runtime/QnnManager.h>
-#include <executorch/backends/qualcomm/schema_generated.h>
 
 namespace executorch {
 namespace backends {
 namespace qnn {
-
-// CRC32 hasher
-class CRC32 {
- public:
-  CRC32() {
-    uint32_t ieee_802_3 = 0x04C11DB7;
-    for (uint32_t i = 0, poly = 0; i < 256; i++, poly = i) {
-      for (size_t j = 0; j < 8; j++) {
-        poly = (poly & 1) ? (ieee_802_3 ^ (poly >> 1)) : (poly >> 1);
-      }
-      lookup_table_.push_back(poly);
-    }
-  }
-  uint32_t hash(const uint8_t* buf, uint32_t length) const {
-    uint32_t val = 0xFFFFFFFF;
-    for (size_t i = 0; i < length; ++i) {
-      val = lookup_table_[(val ^ buf[i]) & 0xFF] ^ (val >> 8);
-    }
-    return val ^ 0xFFFFFFFF;
-  }
-
- private:
-  std::vector<uint32_t> lookup_table_;
-};
 
 using namespace qnn_delegate;
 using executorch::runtime::ArrayRef;
@@ -56,24 +32,6 @@ Result<DelegateHandle*> QnnExecuTorchBackend::init(
     BackendInitContext& context,
     FreeableBuffer* processed,
     ArrayRef<CompileSpec> compile_specs) const {
-  // record the method name to be executed
-  // method_name_ = context.get_method_name();
-
-  // TODO: this is a temporal solution for multi-graph support, will be
-  //       removed once framework starts to accept runtime configuration
-  // ---
-  // check if current context binary has already been initialized
-  // return cached one for reducing memory footprint
-  uint32_t hash_val = CRC32().hash(
-      static_cast<const uint8_t*>(processed->data()), processed->size());
-  auto iter = delegate_map_.find(hash_val);
-  if (iter != delegate_map_.end()) {
-    QNN_EXECUTORCH_LOG_INFO(
-        "Use cached delegate handle for current method: %s",
-        method_name_.c_str());
-    return iter->second;
-  }
-
   // covert SizedBuffer to qnn ExecuTorch option
   QnnExecuTorchContextBinary qnn_context_blob;
   const qnn_delegate::QnnExecuTorchOptions* qnn_executorch_options = nullptr;
@@ -99,6 +57,20 @@ Result<DelegateHandle*> QnnExecuTorchBackend::init(
   // destructible, we must call the destructor manually in destroy().
   new (qnn_manager) QnnManager(qnn_executorch_options, qnn_context_blob);
 
+  // TODO: this is a temporal solution for multi-graph support, will be
+  //       removed once framework starts to accept runtime configuration
+  // ---
+  // check if current context binary has already been initialized
+  // return cached one for reducing memory footprint
+  std::string binary_hash = qnn_manager->GetBinaryHash();
+  auto iter = delegate_map_.find(binary_hash);
+  if (iter != delegate_map_.end()) {
+    QNN_EXECUTORCH_LOG_INFO(
+        "Use cached delegate handle for current method: %s",
+        context.get_method_name());
+    return iter->second;
+  }
+
   ET_CHECK_OR_RETURN_ERROR(
       qnn_manager->Init() == Error::Ok,
       Internal,
@@ -117,7 +89,7 @@ Result<DelegateHandle*> QnnExecuTorchBackend::init(
           "Fail to allocate tensor");
     }
   }
-  add_cached_delegate(hash_val, qnn_manager);
+  add_cached_delegate(binary_hash, qnn_manager);
   return qnn_manager;
 }
 
@@ -131,10 +103,11 @@ Error QnnExecuTorchBackend::execute(
       "DelegateHandle has been deleted");
   QnnManager* qnn_manager = static_cast<QnnManager*>(handle);
 
+  std::string method_name = context.get_method_name();
   std::vector<std::shared_ptr<TensorWrapper>> input_tensors =
-      qnn_manager->GetGraphInputs(method_name_);
+      qnn_manager->GetGraphInputs(method_name);
   std::vector<std::shared_ptr<TensorWrapper>> output_tensors =
-      qnn_manager->GetGraphOutputs(method_name_);
+      qnn_manager->GetGraphOutputs(method_name);
   std::vector<Qnn_Tensor_t> input_tensor_structs;
   std::vector<Qnn_Tensor_t> output_tensor_structs;
 
@@ -167,14 +140,14 @@ Error QnnExecuTorchBackend::execute(
 
   ET_CHECK_OR_RETURN_ERROR(
       qnn_manager->Execute(
-          method_name_,
+          method_name,
           input_tensor_structs,
           output_tensor_structs,
           context.event_tracer()) == Error::Ok,
       Internal,
       "Fail to execute graph");
   ET_CHECK_OR_RETURN_ERROR(
-      qnn_manager->ProfileExecuteData(method_name_, context.event_tracer()) ==
+      qnn_manager->ProfileExecuteData(method_name, context.event_tracer()) ==
           Error::Ok,
       Internal,
       "Fail to profile graph");
@@ -195,26 +168,23 @@ bool QnnExecuTorchBackend::is_available() const {
 }
 
 void QnnExecuTorchBackend::add_cached_delegate(
-    uint32_t hash_val,
-    executorch::runtime::DelegateHandle* handle) {
+    const std::string& hash_val,
+    executorch::runtime::DelegateHandle* handle) const {
   std::lock_guard<std::mutex> guard(mutex_);
   delegate_map_[hash_val] = handle;
   delegate_map_rev_[handle] = hash_val;
 }
 
 void QnnExecuTorchBackend::erase_cached_delegate(
-    executorch::runtime::DelegateHandle* handle) {
+    executorch::runtime::DelegateHandle* handle) const {
   std::lock_guard<std::mutex> guard(mutex_);
-  uint32_t hash_val = delegate_map_rev_[handle];
-  delegate_map_.erase(hash_val);
+  auto iter = delegate_map_rev_.find(handle);
+  if (iter == delegate_map_rev_.end()) {
+    return;
+  }
+  delegate_map_.erase(iter->second);
   delegate_map_rev_.erase(handle);
 }
-
-std::mutex QnnExecuTorchBackend::mutex_;
-std::unordered_map<uint32_t, executorch::runtime::DelegateHandle*>
-    QnnExecuTorchBackend::delegate_map_;
-std::unordered_map<executorch::runtime::DelegateHandle*, uint32_t>
-    QnnExecuTorchBackend::delegate_map_rev_;
 
 namespace {
 auto cls = QnnExecuTorchBackend();

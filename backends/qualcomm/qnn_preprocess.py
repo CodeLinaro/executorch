@@ -20,6 +20,9 @@ from executorch.backends.qualcomm._passes.layout_transform import LayoutTransfor
 from executorch.backends.qualcomm.builders.node_visitor import get_node_visitors
 from executorch.backends.qualcomm.builders.qnn_constants import OpContextLoader
 from executorch.backends.qualcomm.partition.utils import generate_qnn_executorch_option
+from executorch.backends.qualcomm.serialization.qc_schema_serialize import (
+    processed_binary_to_flatbuffer,
+)
 from executorch.exir.backend.backend_details import (
     BackendDetails,
     CompileSpec,
@@ -89,7 +92,9 @@ class QnnBackend(BackendDetails):
                         assert node.target == context_loader_target, err_msg
                         # if graph has context binary loader node, return directly
                         return PreprocessResult(
-                            processed_bytes=node.meta[OpContextLoader.meta_ctx_bin],
+                            processed_bytes=processed_binary_to_flatbuffer(
+                                node.meta[OpContextLoader.meta_ctx_bin]
+                            ),
                             debug_handle_map={},
                         )
                     except:
@@ -111,5 +116,6 @@ class QnnBackend(BackendDetails):
         qnn_manager.Destroy()
         # For now, debug_handle_map is not used by QNN ExecuTorch
         return PreprocessResult(
-            processed_bytes=bytes(qnn_context_binary), debug_handle_map={}
+            processed_bytes=processed_binary_to_flatbuffer(bytes(qnn_context_binary)),
+            debug_handle_map={},
         )

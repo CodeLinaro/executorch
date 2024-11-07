@@ -7,6 +7,7 @@
  */
 
 #include <executorch/backends/qualcomm/aot/ir/qcir_utils.h>
+#include <executorch/backends/qualcomm/qc_processed_binary_generated.h>
 #include <executorch/backends/qualcomm/runtime/QnnManager.h>
 #include <executorch/backends/qualcomm/runtime/SharedBuffer.h>
 #include <executorch/backends/qualcomm/runtime/Utils.h>
@@ -487,18 +488,8 @@ Error QnnManager::GetContextBinary(
 }
 
 Error QnnManager::CompileQcir() {
-  // check if context binary came from flatbuffer
-  flatbuffers::Verifier verifier(
-      static_cast<const uint8_t* const>(qnn_context_blob_.buffer),
-      qnn_context_blob_.nbytes);
-
-  if (!qcir::VerifyContextBuffer(verifier)) {
-    QNN_EXECUTORCH_LOG_ERROR(
-        "Failed to verify qcir. The binary might be broken.");
-    return Error::Internal;
-  }
-
-  auto context = qcir::GetContext(qnn_context_blob_.buffer);
+  auto binary_info = GetProcessedBinaryInfo(qnn_context_blob_.buffer);
+  auto context = qcir::GetContext(binary_info->data()->data());
   for (const auto& graph : *context->graphs()) {
     // qcir tensors to TensorWrapper
     std::vector<std::shared_ptr<TensorWrapper>> graph_inputs, graph_outputs,
@@ -676,7 +667,17 @@ Error QnnManager::Compile(
   }
 
   return Error::Ok;
-};
+}
+
+std::string QnnManager::GetBinaryHash() {
+  flatbuffers::Verifier verifier(
+      static_cast<const uint8_t* const>(qnn_context_blob_.buffer),
+      qnn_context_blob_.nbytes);
+  return VerifyProcessedBinaryInfoBuffer(verifier)
+      ? GetProcessedBinaryInfo(qnn_context_blob_.buffer)->hash()->str()
+      : "";
+}
+
 } // namespace qnn
 } // namespace backends
 } // namespace executorch

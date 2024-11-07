@@ -39,18 +39,16 @@ class QnnExecuTorchBackend final
   bool is_available() const override;
 
  private:
-  static void add_cached_delegate(
-      uint32_t hash_val,
-      executorch::runtime::DelegateHandle* handle);
-  static void erase_cached_delegate(
-      executorch::runtime::DelegateHandle* handle);
+  void add_cached_delegate(
+      const std::string& hash_val,
+      executorch::runtime::DelegateHandle* handle) const;
+  void erase_cached_delegate(executorch::runtime::DelegateHandle* handle) const;
 
-  static std::mutex mutex_;
-  static std::unordered_map<uint32_t, executorch::runtime::DelegateHandle*>
+  mutable std::mutex mutex_;
+  mutable std::unordered_map<std::string, executorch::runtime::DelegateHandle*>
       delegate_map_;
-  static std::unordered_map<executorch::runtime::DelegateHandle*, uint32_t>
+  mutable std::unordered_map<executorch::runtime::DelegateHandle*, std::string>
       delegate_map_rev_;
-  mutable std::string method_name_;
 };
 
 } // namespace qnn

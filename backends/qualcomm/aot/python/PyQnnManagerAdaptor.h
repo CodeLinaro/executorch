@@ -8,10 +8,11 @@
 #pragma once
 #include <executorch/backends/qualcomm/aot/ir/qcir_utils.h>
 #include <executorch/backends/qualcomm/aot/python/PyQnnWrapperAdaptor.h>
+#include <executorch/backends/qualcomm/qc_compiler_spec_generated.h>
+#include <executorch/backends/qualcomm/qc_processed_binary_generated.h>
 #include <executorch/backends/qualcomm/runtime/Logging.h>
 #include <executorch/backends/qualcomm/runtime/QnnExecuTorch.h>
 #include <executorch/backends/qualcomm/runtime/QnnManager.h>
-#include <executorch/backends/qualcomm/schema_generated.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -57,15 +58,23 @@ class PyQnnManager {
     std::vector<flatbuffers::Offset<qcir::Graph>> graphs;
     for (size_t i = 0; i < qcirs.size(); ++i) {
       py::buffer_info info(py::buffer(qcirs[i].cast<py::bytes>()).request());
-      flatbuffers::Verifier verifier(
+      flatbuffers::Verifier verifier_processed_info(
           static_cast<const uint8_t* const>(info.ptr),
           info.size * info.itemsize);
+      if (!qnn_delegate::VerifyProcessedBinaryInfoBuffer(
+              verifier_processed_info)) {
+        QNN_EXECUTORCH_LOG_ERROR("Fail to verify processed binary");
+        return;
+      }
+      auto processed_info = qnn_delegate::GetProcessedBinaryInfo(info.ptr);
 
-      if (!qcir::VerifyContextBuffer(verifier)) {
+      flatbuffers::Verifier verifier_qcir(
+          processed_info->data()->data(), processed_info->data()->size());
+      if (!qcir::VerifyContextBuffer(verifier_qcir)) {
         QNN_EXECUTORCH_LOG_ERROR("Fail to verify qcir format");
         return;
       }
-      auto context = qcir::GetContext(info.ptr);
+      auto context = qcir::GetContext(processed_info->data()->data());
       for (const auto& graph : *context->graphs()) {
         std::vector<flatbuffers::Offset<qcir::Tensor>> tensors;
         for (const auto tensor : *graph->tensors()) {
@@ -102,8 +111,17 @@ class PyQnnManager {
             builder_, graph->name()->str().c_str(), &nodes, &tensors));
       }
     }
+
     auto context = qcir::CreateContextDirect(builder_, &graphs);
     builder_.Finish(context);
+    std::vector<uint8_t> data(
+        builder_.GetBufferPointer(),
+        builder_.GetBufferPointer() + builder_.GetSize());
+    builder_.Reset();
+
+    auto processed_binary = qnn_delegate::CreateProcessedBinaryInfoDirect(
+        builder_, "qcirs_to_context_binary", &data);
+    builder_.Finish(processed_binary);
     qnn_executorch_context_binary_.buffer = builder_.GetBufferPointer();
     qnn_executorch_context_binary_.nbytes = builder_.GetSize();
     qnn_manager_ = std::make_shared<QnnManager>(

@@ -6,7 +6,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <executorch/backends/qualcomm/qc_processed_binary_generated.h>
 #include <executorch/backends/qualcomm/runtime/backends/QnnContextCommon.h>
+
 namespace executorch {
 namespace backends {
 namespace qnn {
@@ -45,12 +47,13 @@ Error QnnContext::Configure() {
   if (cache_->GetCacheState() == QnnBackendCache::DESERIALIZE) {
     const QnnExecuTorchContextBinary& qnn_context_blob =
         cache_->GetQnnContextBlob();
+    auto binary_info = GetProcessedBinaryInfo(qnn_context_blob.buffer);
     error = qnn_interface.qnn_context_create_from_binary(
         backend_->GetHandle(),
         device_->GetHandle(),
         temp_context_config.empty() ? nullptr : temp_context_config.data(),
-        qnn_context_blob.buffer,
-        qnn_context_blob.nbytes,
+        const_cast<uint8_t*>(binary_info->data()->data()),
+        binary_info->data()->size(),
         &handle_,
         /*profile=*/nullptr);
     if (error != QNN_SUCCESS) {

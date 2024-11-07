@@ -5,15 +5,20 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
+
 #include <executorch/backends/qualcomm/aot/ir/qcir_utils.h>
+#include <executorch/backends/qualcomm/qc_processed_binary_generated.h>
 #include <executorch/backends/qualcomm/runtime/backends/QnnBackendCache.h>
+
 namespace executorch {
 namespace backends {
 namespace qnn {
 
 using executorch::runtime::Error;
 
-Error QnnBackendCache::GetQnnGraphInfoFromBinary() {
+Error QnnBackendCache::GetQnnGraphInfoFromBinary(
+    void* buffer,
+    uint32_t nbytes) {
   const QnnSystemInterface& qnn_sys_interface =
       qnn_sys_impl_.GetQnnSystemInterface();
   std::uint32_t num_graphs;
@@ -23,11 +28,7 @@ Error QnnBackendCache::GetQnnGraphInfoFromBinary() {
   Qnn_ErrorHandle_t error = QNN_SUCCESS;
 
   error = qnn_sys_interface.qnn_system_context_get_binary_info(
-      sys_context_handle_,
-      qnn_context_blob_.buffer,
-      qnn_context_blob_.nbytes,
-      &binaryinfo,
-      &binaryinfo_size);
+      sys_context_handle_, buffer, nbytes, &binaryinfo, &binaryinfo_size);
 
   if (error != QNN_SUCCESS) {
     QNN_EXECUTORCH_LOG_WARN(
@@ -106,16 +107,19 @@ Error QnnBackendCache::Configure() {
   // DO DESERIALIZE
   state_ = DESERIALIZE;
   QNN_EXECUTORCH_LOG_INFO("Caching: Caching is in RESTORE MODE.");
-  Error status = GetQnnGraphInfoFromBinary();
+  auto binary_info = GetProcessedBinaryInfo(qnn_context_blob_.buffer);
+  Error status = GetQnnGraphInfoFromBinary(
+      const_cast<uint8_t*>(binary_info->data()->data()),
+      binary_info->data()->size());
+
   if (status == Error::Internal) {
     // check if context binary came from flatbuffer
     flatbuffers::Verifier verifier(
-        static_cast<const uint8_t* const>(qnn_context_blob_.buffer),
-        qnn_context_blob_.nbytes);
+        binary_info->data()->data(), binary_info->data()->size());
 
     if (qcir::VerifyContextBuffer(verifier)) {
       state_ = ONLINE_PREPARE;
-      auto context = qcir::GetContext(qnn_context_blob_.buffer);
+      auto context = qcir::GetContext(binary_info->data()->data());
       for (const auto& graph : *context->graphs()) {
         graph_names_.emplace_back(graph->name()->str());
       }

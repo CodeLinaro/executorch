@@ -9,10 +9,10 @@
 
 #include <executorch/backends/qualcomm/aot/wrappers/OpWrapper.h>
 #include <executorch/backends/qualcomm/aot/wrappers/TensorWrapper.h>
+#include <executorch/backends/qualcomm/qc_compiler_spec_generated.h>
 #include <executorch/backends/qualcomm/runtime/Logging.h>
 #include <executorch/backends/qualcomm/runtime/QnnExecuTorch.h>
 #include <executorch/backends/qualcomm/runtime/backends/QnnBackendFactory.h>
-#include <executorch/backends/qualcomm/schema_generated.h>
 #include <executorch/runtime/core/error.h>
 
 #include <memory>
@@ -102,6 +102,8 @@ class QnnManager {
   std::vector<std::string> GetGraphNames() {
     return backend_params_ptr_->qnn_context_ptr_->GetGraphNames();
   }
+
+  std::string GetBinaryHash();
 
  private:
   executorch::runtime::Error LoadQnnLibrary();

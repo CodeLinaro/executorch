@@ -64,7 +64,9 @@ class QnnBackendCache {
   }
 
  private:
-  executorch::runtime::Error GetQnnGraphInfoFromBinary();
+  executorch::runtime::Error GetQnnGraphInfoFromBinary(
+      void* buffer,
+      uint32_t nbytes);
 
   template <typename INFO>
   void RetrieveGraphInfo(const INFO& info);

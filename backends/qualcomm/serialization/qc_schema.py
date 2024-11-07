@@ -12,6 +12,12 @@ from dataclasses import dataclass
 from enum import IntEnum, unique
 
 
+@dataclass
+class ProcessedBinaryInfo:
+    hash: str = ""
+    data: bytes = None
+
+
 @unique
 class HtpArch(IntEnum):
     NONE = 0

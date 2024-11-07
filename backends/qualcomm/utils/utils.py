@@ -54,7 +54,7 @@ from executorch.backends.qualcomm.partition.qnn_partitioner import (
     generate_qnn_executorch_option,
     QnnPartitioner,
 )
-from executorch.backends.qualcomm.serialization.qnn_compile_spec_schema import (
+from executorch.backends.qualcomm.serialization.qc_schema import (
     _soc_info_table,
     HtpArch,
     QcomChipset,
@@ -67,9 +67,9 @@ from executorch.backends.qualcomm.serialization.qnn_compile_spec_schema import (
     QnnExecuTorchOptions,
     QnnExecuTorchProfileLevel,
 )
-from executorch.backends.qualcomm.serialization.qnn_compile_spec_serialize import (
-    convert_to_flatbuffer,
-    convert_to_option,
+from executorch.backends.qualcomm.serialization.qc_schema_serialize import (
+    flatbuffer_to_option,
+    option_to_flatbuffer,
 )
 from executorch.backends.qualcomm.utils.constants import (
     QCOM_PASS_EXPAND_BROADCAST_SHAPE,
@@ -223,7 +223,7 @@ def canonicalize_program(
             max_sf_buf_size, module_map = 0, {}
             for _, m in prog.graph_module._modules.items():
                 # currently only 1 compile spec is expected in each partition
-                options = convert_to_option(m.compile_specs[0].value)
+                options = flatbuffer_to_option(m.compile_specs[0].value)
                 if (
                     options.backend_options.backend_type
                     == QnnExecuTorchBackendType.kHtpBackend
@@ -252,7 +252,7 @@ def canonicalize_program(
             )
             qnn_mgr.Destroy()
             return spill_fill_size, {
-                module: convert_to_option(module.compile_specs[0].value)
+                module: flatbuffer_to_option(module.compile_specs[0].value)
             }
 
         dispatch = {
@@ -263,7 +263,7 @@ def canonicalize_program(
 
     def update_program(max_sf_buf_size, module_map):
         def set_spec(module, options):
-            spec = CompileSpec(QCOM_QNN_COMPILE_SPEC, convert_to_flatbuffer(options))
+            spec = CompileSpec(QCOM_QNN_COMPILE_SPEC, option_to_flatbuffer(options))
             if isinstance(module, ExportedProgram):
                 module.compile_specs[0] = spec
             else:
@@ -542,9 +542,6 @@ def skip_annotation(
     from executorch.backends.qualcomm.serialization.qnn_compile_spec_schema import (
         QnnExecuTorchHtpPrecision,
     )
-    from executorch.backends.qualcomm.serialization.qnn_compile_spec_serialize import (
-        convert_to_option,
-    )
     from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
     from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 
@@ -595,14 +592,14 @@ def skip_annotation(
             qnn_option = generate_qnn_executorch_option(
                 partitioner.compiler_specs_snapshot
             )
-            compile_option = convert_to_option(qnn_option)
+            compile_option = flatbuffer_to_option(qnn_option)
             htp_options = compile_option.backend_options.htp_options
             htp_options.precision = QnnExecuTorchHtpPrecision.kHtpFp16
             partitioner.delegation_spec = DelegationSpec(
                 "QnnBackend",
                 [
                     CompileSpec(
-                        QCOM_QNN_COMPILE_SPEC, convert_to_flatbuffer(compile_option)
+                        QCOM_QNN_COMPILE_SPEC, option_to_flatbuffer(compile_option)
                     )
                 ],
             )
@@ -767,7 +764,7 @@ def generate_multi_graph_prog(
         graph_outputs[graph_name] = qnn_mgr.GetGraphOutputs(graph_name)
     qnn_mgr.Destroy()
     # build custom ops with different graph signatures
-    compiler_options = convert_to_option(compiler_specs[0].value)
+    compiler_options = flatbuffer_to_option(compiler_specs[0].value)
     bundle_progs = [
         from_context_binary(
             ctx_path=qnn_ctx_bin,
@@ -852,7 +849,7 @@ def generate_qnn_executorch_compiler_spec(
     shared_buffer: bool = False,
     is_from_context_binary: bool = False,
     multiple_graphs: bool = False,
-    graph_name: str = "executorch",
+    graph_name: str = "forward",
 ) -> List[CompileSpec]:
     """
     Helper function generating compiler specs for Qualcomm AI Engine Direct
@@ -946,9 +943,7 @@ def generate_qnn_executorch_compiler_spec(
             backend_options.htp_options.use_weight_sharing = True
 
     return [
-        CompileSpec(
-            QCOM_QNN_COMPILE_SPEC, convert_to_flatbuffer(qnn_executorch_options)
-        )
+        CompileSpec(QCOM_QNN_COMPILE_SPEC, option_to_flatbuffer(qnn_executorch_options))
     ]
 
 
