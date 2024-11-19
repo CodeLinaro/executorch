@@ -413,6 +413,7 @@ Error HtpDevice::AfterCreateDevice() {
 
     // vote immediately
     PerformanceVote();
+    htp_perf_mode_ = htp_options_->performance_mode();
 
     // Set Rpc polling mode
     rpc_power_configs_ =
@@ -423,6 +424,47 @@ Error HtpDevice::AfterCreateDevice() {
         powerconfig_client_id_, rpc_power_configs_ptr_.data());
   }
 
+  return Error::Ok;
+}
+
+Error HtpDevice::VotePower(QnnExecuTorchHtpPerformanceMode perf_mode) {
+
+  if(!vote_power_mutex_.try_lock()) {
+    QNN_EXECUTORCH_LOG_WARN(
+        "Hey there, please don't call VotePower() in parallel. "
+        "Giving up perf_mode=%d", perf_mode);
+    return Error::AccessFailed;
+  }
+
+  if(perf_mode == htp_perf_mode_) {
+    QNN_EXECUTORCH_LOG_WARN(
+        "This Htp backend instance has been in perf mode %d", perf_mode);
+    goto goodbye;
+  }
+
+  htp_perf_mode_ = perf_mode;
+
+  perf_power_configs_ = SetVotePowerConfig(
+      powerconfig_client_id_,
+      htp_perf_mode_,
+      PerformanceModeVoteType::kUpVote);
+  perf_power_configs_ptr_ = ObtainNullTermPtrVector(perf_power_configs_);
+
+  PerformanceVote();
+
+  // Set Rpc polling mode
+  // mmmmmmmm... this looks suspicious
+  // Should we set polling for low power mode?
+  rpc_power_configs_ =
+      SetRpcPollingPowerConfig(htp_perf_mode_);
+  rpc_power_configs_ptr_ = ObtainNullTermPtrVector(rpc_power_configs_);
+
+  htp_perf_infra_->setPowerConfig(
+      powerconfig_client_id_, rpc_power_configs_ptr_.data());
+
+// bad~bad~
+goodbye:
+  vote_power_mutex_.unlock();
   return Error::Ok;
 }
 

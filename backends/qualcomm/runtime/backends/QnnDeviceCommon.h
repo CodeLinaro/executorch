@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "QnnDevice.h"
+#include "executorch/runtime/core/error.h"
 namespace executorch {
 namespace backends {
 namespace qnn {
@@ -30,6 +31,11 @@ class QnnDevice {
   }
 
   executorch::runtime::Error Configure();
+
+  // yeah break abstration
+  virtual runtime::Error VotePower(QnnExecuTorchHtpPerformanceMode /*perf_mode*/) {
+    return runtime::Error::Ok;
+  };
 
  protected:
   virtual executorch::runtime::Error MakeConfig(

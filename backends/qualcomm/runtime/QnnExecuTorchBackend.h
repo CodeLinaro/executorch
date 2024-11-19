@@ -38,6 +38,8 @@ class QnnExecuTorchBackend final
 
   bool is_available() const override;
 
+  void VotePower(int perf_mode);
+
  private:
   void add_cached_delegate(
       const std::string& signature,

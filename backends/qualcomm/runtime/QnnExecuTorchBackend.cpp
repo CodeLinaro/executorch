@@ -10,6 +10,7 @@
 #include <executorch/backends/qualcomm/qc_compiler_spec_generated.h>
 #include <executorch/backends/qualcomm/runtime/QnnExecuTorchBackend.h>
 #include <executorch/backends/qualcomm/runtime/QnnManager.h>
+#include "executorch/runtime/core/error.h"
 
 namespace executorch {
 namespace backends {
@@ -186,6 +187,24 @@ void QnnExecuTorchBackend::erase_cached_delegate(
   delegate_map_rev_.erase(handle);
 }
 
+void QnnExecuTorchBackend::VotePower(int perf_mode) {
+  QnnExecuTorchHtpPerformanceMode htp_perf_mode = static_cast<QnnExecuTorchHtpPerformanceMode>(perf_mode);
+
+  for(auto& pair : delegate_map_) {
+    QnnManager* qnn_manager = static_cast<QnnManager*>(pair.second);
+    runtime::Error error = qnn_manager->VotePower(htp_perf_mode);
+    if(error == runtime::Error::Ok) {
+      QNN_EXECUTORCH_LOG_INFO(
+          "perf_mode=%d, vote OK, though I don't know which this QNN delegate is",
+          perf_mode);
+    } else {
+      QNN_EXECUTORCH_LOG_ERROR(
+          "perf_mode=%d, vote failed, though I don't know which this QNN delegate is",
+          perf_mode);
+    }
+  }
+}
+
 namespace {
 auto cls = QnnExecuTorchBackend();
 executorch::runtime::Backend backend{"QnnBackend", &cls};
@@ -194,3 +213,7 @@ static auto success_with_compiler = register_backend(backend);
 } // namespace qnn
 } // namespace backends
 } // namespace executorch
+
+void VotePower(int perf_mode) {
+  executorch::backends::qnn::cls.VotePower(perf_mode);
+}

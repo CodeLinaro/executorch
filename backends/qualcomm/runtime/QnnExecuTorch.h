@@ -65,6 +65,10 @@ void QnnExecuTorchAddCustomMemTensorInfo(const CustomMemTensorInfo& info);
 /// Free the allocated shared memory.
 void QnnExecuTorchFreeCustomMem(void* buffer_ptr);
 
+void VotePower(int perf_mode);
+
 #ifdef __cplusplus
 }
 #endif // __cplusplus
+
+

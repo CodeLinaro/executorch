@@ -109,6 +109,10 @@ class QnnManager {
 
   std::string GetBinarySignature();
 
+  executorch::runtime::Error VotePower(QnnExecuTorchHtpPerformanceMode perf_mode) {
+    return backend_params_ptr_->qnn_device_ptr_->VotePower(perf_mode);
+  }
+
  private:
   executorch::runtime::Error LoadQnnLibrary();
 

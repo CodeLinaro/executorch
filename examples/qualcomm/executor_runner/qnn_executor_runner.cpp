@@ -29,6 +29,7 @@
 
 #include <gflags/gflags.h>
 
+#include <cstdio>
 #include <chrono>
 #include <fstream>
 #include <memory>
@@ -44,8 +45,8 @@ DEFINE_string(
     "outputs",
     "Executorch inference data output path.");
 DEFINE_string(input_list_path, "input_list.txt", "Model input list path.");
-DEFINE_int32(iteration, 1, "Iterations of inference.");
-DEFINE_int32(warm_up, 0, "Pre-run before inference.");
+DEFINE_int32(iteration, 100, "Iterations of inference.");
+DEFINE_int32(warm_up, 10, "Pre-run before inference.");
 DEFINE_bool(
     shared_buffer,
     false,
@@ -377,12 +378,14 @@ int main(int argc, char** argv) {
       Error status = Error::Ok;
       // Warm up
       ET_LOG(Info, "Perform %d inference for warming up", FLAGS_warm_up);
+      printf("!!! Warn up %d\n", FLAGS_warm_up);
       for (int i = 0; i < FLAGS_warm_up; ++i) {
         status = method->execute();
       }
 
       // Inference with designated iterations
       ET_LOG(Info, "Start inference (%d)", inference_index);
+      printf("!!! iteration %d\n", FLAGS_iteration);
       auto before_exec = std::chrono::high_resolution_clock::now();
       for (int i = 0; i < FLAGS_iteration; ++i) {
         status = method->execute();
@@ -396,11 +399,42 @@ int main(int argc, char** argv) {
       elapsed_time += interval_infs;
 
       ET_LOG(
-          Info,
+          Error,
           "%d inference took %f ms, avg %f ms",
           FLAGS_iteration,
           interval_infs,
           interval_infs / (float)FLAGS_iteration);
+      printf("!!! avg = %f ms\n",interval_infs / (float)FLAGS_iteration);
+      ET_CHECK_MSG(
+          status == Error::Ok,
+          "Execution of method %s failed with status 0x%" PRIx32,
+          method_name,
+          (int)status);
+
+      /// Vote and run
+      // Inference with designated iterations
+      ET_LOG(Info, "!!! Start inference (%d)", inference_index);
+      VotePower(5); // LowPower Saver
+      before_exec = std::chrono::high_resolution_clock::now();
+      for (int i = 0; i < FLAGS_iteration; ++i) {
+        status = method->execute();
+      }
+      after_exec = std::chrono::high_resolution_clock::now();
+      interval_infs =
+          std::chrono::duration_cast<std::chrono::microseconds>(
+              after_exec - before_exec)
+              .count() /
+          1000.0;
+      // mmmm.. maybe we don't need to add... but anyway...
+      elapsed_time += interval_infs;
+
+      ET_LOG(
+          Error,
+          "[Updated Vote] %d inference took %f ms, avg %f ms",
+          FLAGS_iteration,
+          interval_infs,
+          interval_infs / (float)FLAGS_iteration);
+      printf("!!![5] avg = %f ms\n",interval_infs / (float)FLAGS_iteration);
       ET_CHECK_MSG(
           status == Error::Ok,
           "Execution of method %s failed with status 0x%" PRIx32,
@@ -428,6 +462,7 @@ int main(int argc, char** argv) {
       }
 
       ++inference_index;
+      break;
     }
     ET_LOG(
         Info,

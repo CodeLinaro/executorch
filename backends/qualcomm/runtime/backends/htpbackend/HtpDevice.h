@@ -11,6 +11,7 @@
 #include <executorch/backends/qualcomm/runtime/backends/htpbackend/HtpDeviceCustomConfig.h>
 #include <executorch/backends/qualcomm/runtime/backends/htpbackend/HtpDevicePlatformInfoConfig.h>
 #include <memory>
+#include <mutex>
 
 #include "HTP/QnnHtpDevice.h"
 
@@ -43,6 +44,8 @@ class HtpDevice : public QnnDevice {
     kUpVote = 1,
     kDownVote = 2,
   };
+
+  runtime::Error VotePower(QnnExecuTorchHtpPerformanceMode perf_mode) override;
 
  protected:
   executorch::runtime::Error MakeConfig(
@@ -91,6 +94,10 @@ class HtpDevice : public QnnDevice {
 
   const SocInfo* qcom_target_soc_info_;
   const QnnExecuTorchHtpBackendOptions* htp_options_;
+  // workaround the above constant...
+  QnnExecuTorchHtpPerformanceMode htp_perf_mode_;
+
+  std::mutex vote_power_mutex_;
 };
 } // namespace qnn
 } // namespace backends
