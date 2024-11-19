@@ -28,7 +28,7 @@ from executorch.examples.qualcomm.utils import (
 def get_dataset(data_size, dataset_dir, download):
     import numpy as np
     from torchvision import datasets, transforms
-
+    # inp size
     input_size = (224, 224)
     preprocess = transforms.Compose(
         [
