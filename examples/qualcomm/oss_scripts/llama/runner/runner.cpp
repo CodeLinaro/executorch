@@ -44,7 +44,7 @@ Runner::Runner(
     const int32_t logits_offset,
     const float temperature,
     const int eval_mode,
-    const std::string& kv_updator)
+    const std::string& kv_updater)
     : n_bos_(1),
       n_eos_(1),
       tokenizer_path_(tokenizer_path),
@@ -52,7 +52,7 @@ Runner::Runner(
       logits_offset_(logits_offset),
       temperature_(temperature),
       eval_mode_(static_cast<EvalMode>(eval_mode)),
-      kv_updator_(kv_updator) {
+      kv_updater_(kv_updater) {
   for (size_t i = 0; i < models_path.size(); ++i) {
     modules_.push_back(std::make_shared<Module>(
         models_path[i], Module::LoadMode::MmapUseMlockIgnoreErrors));
@@ -76,10 +76,6 @@ Error Runner::load() {
   }
 
   switch (eval_mode_) {
-    case EvalMode::kPrefill:
-      prefill_forward_name_ = "forward";
-      method_names_.emplace_back(prefill_forward_name_);
-      break;
     case EvalMode::kKVCached:
       kv_forward_name_ = "forward";
       method_names_.emplace_back(kv_forward_name_);
@@ -112,10 +108,12 @@ Error Runner::load() {
                              ->sizes()[1];
   }
   if (!kv_forward_name_.empty()) {
-    // Use k cache length to retirieve kv cache len
-    // Cache len equals to kv model seq_len - 1
-    kv_cache_len_ =
-        get_methods_meta(kv_forward_name_)[0]->input_tensor_meta(3)->sizes()[2];
+    // Use attention mask length to retrieve kv ar len and context length
+    // Cache len equals to kv model max_seq_len - kv_ar_len
+    auto atten_mask_meta = get_methods_meta(kv_forward_name_)[0]->input_tensor_meta(1);
+    kv_ar_len_ = atten_mask_meta->sizes()[1];
+    context_len_ = atten_mask_meta->sizes()[2];
+    kv_cache_len_ = context_len_ - kv_ar_len_;
   }
 
   // retrieve any method meta, can be either prefill or kv
@@ -129,10 +127,13 @@ Error Runner::load() {
       executorch::aten::ScalarType::Long;
   ET_CHECK_MSG(num_layers != -1, "Could not retrieve num layers");
 
-  if (kv_updator_ == "SmartMask") {
+  if (kv_updater_ == "SmartMask") {
     io_mgr_ = std::make_unique<SmartMaskIoMgr>(
         modules_,
+        context_len_,
+        prefill_ar_len_,
         prefill_cache_len_,
+        kv_ar_len_,
         kv_cache_len_,
         vocab_size_,
         num_layers,
@@ -142,7 +143,7 @@ Error Runner::load() {
         prefill_forward_name_,
         kv_forward_name_,
         use_int64_token_);
-  } else if (kv_updator_ == "ShiftPointer") {
+  } else if (kv_updater_ == "ShiftPointer") {
     io_mgr_ = std::make_unique<ShiftPointerIoMgr>(
         modules_,
         prefill_cache_len_,
@@ -156,16 +157,13 @@ Error Runner::load() {
         kv_forward_name_,
         use_int64_token_);
   } else {
-    ET_LOG(Error, "Using an unknown updator %s", kv_updator_.c_str());
+    ET_LOG(Error, "Using an unknown updater %s", kv_updater_.c_str());
   }
   ET_LOG(Info, "creating io_memory");
 
   // prepare io
   io_mgr_->init_io();
   switch (eval_mode_) {
-    case EvalMode::kPrefill:
-      io_mgr_->prepare_prefill_io(get_methods_meta(prefill_forward_name_));
-      break;
     case EvalMode::kKVCached:
       io_mgr_->prepare_kv_io(get_methods_meta(kv_forward_name_));
       break;
@@ -428,9 +426,6 @@ Error Runner::generate(
   };
 
   switch (eval_mode_) {
-    case EvalMode::kPrefill:
-      prefill_execute(prefill_forward_name_);
-      break;
     case EvalMode::kKVCached:
       kv_execute(kv_forward_name_);
       break;

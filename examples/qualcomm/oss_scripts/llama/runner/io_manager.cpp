@@ -54,7 +54,10 @@ std::vector<Tensor> IoMgrBase::get_output_tensors(
 
 ShiftPointerIoMgr::ShiftPointerIoMgr(
     std::vector<std::shared_ptr<Module>>& modules,
+    int32_t context_len,
+    int32_t prefill_ar_len,
     int32_t prefill_cache_len,
+    int32_t kv_ar_len,
     int32_t kv_cache_len,
     int32_t vocab_size,
     int32_t num_layers,
@@ -66,6 +69,8 @@ ShiftPointerIoMgr::ShiftPointerIoMgr(
     const bool use_int64_token)
     : IoMgrBase(modules),
       shard_layers_({num_layers}),
+      context_len_(context_len),
+      kv_ar_len_(kv_ar_len),
       kv_cache_len_(kv_cache_len),
       prefill_cache_len_(prefill_cache_len),
       vocab_size_(vocab_size),
@@ -116,8 +121,8 @@ void ShiftPointerIoMgr::init_io() {
   int32_t max_cache_len = std::max(kv_cache_len_, prefill_cache_len_);
   int32_t k_in_size = (head_dim_ + 1) * max_cache_len;
   int32_t v_cache_size = (num_heads_ + 1) * max_cache_len * head_dim_;
-  int32_t k_cache_out_size = num_heads_ * head_dim_;
-  if (eval_mode_ == EvalMode::kHybrid || eval_mode_ == EvalMode::kPrefill) {
+  int32_t k_cache_out_size = num_heads_ * kv_ar_len_ * head_dim_;
+  if (eval_mode_ == EvalMode::kHybrid) {
     k_cache_out_size *= prefill_cache_len_;
   }
 
@@ -136,8 +141,8 @@ void ShiftPointerIoMgr::init_io() {
   };
 
   auto init_kv = [&]() {
-    ptr->kv_logits.resize(vocab_size_);
-    ptr->kv_attention_mask.resize((kv_cache_len_ + 1), 0);
+    ptr->kv_logits.resize(kv_ar_len_ * vocab_size_);
+    ptr->kv_attention_mask.resize((kv_ar_len_ * context_len_), 0);
     ptr->k_cache.reserve(num_layers_);
     for (int layer = 0; layer < num_layers_; layer++) {
       ptr->k_cache.emplace_back();
@@ -149,9 +154,6 @@ void ShiftPointerIoMgr::init_io() {
   };
 
   switch (eval_mode_) {
-    case EvalMode::kPrefill:
-      init_prefill();
-      break;
     case EvalMode::kKVCached:
       init_kv();
       break;
@@ -177,62 +179,65 @@ void ShiftPointerIoMgr::prepare_kv_io(
   IO* ptr = static_cast<IO*>(data_ptr_.get());
 
   // [I]: input_tokens
-  Result<TensorInfo> input_tok = methods_meta[0]->input_tensor_meta(0);
-  input_tok_ = std::make_unique<TensorImpl>(
-      input_tok->scalar_type(),
-      input_tok->sizes().size(),
-      const_cast<TensorImpl::SizesType*>(input_tok->sizes().data()),
-      &ptr->input_tok,
-      const_cast<TensorImpl::DimOrderType*>(input_tok->dim_order().data()));
-  input_tensors_[kv_forward_name_][0].push_back(input_tok_.get());
+  Result<TensorInfo> kv_input_toks = methods_meta[0]->input_tensor_meta(0);
+  kv_input_toks_ = std::make_unique<TensorImpl>(
+      kv_input_toks->scalar_type(),
+      kv_input_toks->sizes().size(),
+      const_cast<TensorImpl::SizesType*>(kv_input_toks->sizes().data()),
+      &ptr->kv_input_toks,
+      const_cast<TensorImpl::DimOrderType*>(kv_input_toks->dim_order().data()));
+  input_tensors_[kv_forward_name_][0].push_back(kv_input_toks_.get());
 
   // [I]: atten_mask
-  Result<TensorInfo> atten_mask = methods_meta[0]->input_tensor_meta(1);
-  attention_mask_ = std::make_unique<TensorImpl>(
-      atten_mask->scalar_type(),
-      atten_mask->sizes().size(),
-      const_cast<TensorImpl::SizesType*>(atten_mask->sizes().data()),
+  Result<TensorInfo> kv_attention_mask = methods_meta[0]->input_tensor_meta(1);
+  kv_attention_mask_ = std::make_unique<TensorImpl>(
+      kv_attention_mask->scalar_type(),
+      kv_attention_mask->sizes().size(),
+      const_cast<TensorImpl::SizesType*>(kv_attention_mask->sizes().data()),
       ptr->kv_attention_mask.data(),
-      const_cast<TensorImpl::DimOrderType*>(atten_mask->dim_order().data()));
-  input_tensors_[kv_forward_name_][0].push_back(attention_mask_.get());
+      const_cast<TensorImpl::DimOrderType*>(kv_attention_mask->dim_order().data()));
+  input_tensors_[kv_forward_name_][0].push_back(kv_attention_mask_.get());
 
   // [I]: input_pos
-  Result<TensorInfo> input_pos = methods_meta[0]->input_tensor_meta(2);
-  input_pos_ = std::make_unique<TensorImpl>(
-      input_pos->scalar_type(),
-      input_pos->sizes().size(),
-      const_cast<TensorImpl::SizesType*>(input_pos->sizes().data()),
-      &ptr->input_pos,
-      const_cast<TensorImpl::DimOrderType*>(input_pos->dim_order().data()));
-  input_tensors_[kv_forward_name_][0].push_back(input_pos_.get());
+  Result<TensorInfo> kv_input_pos = methods_meta[0]->input_tensor_meta(2);
+  kv_input_pos_ = std::make_unique<TensorImpl>(
+      kv_input_pos->scalar_type(),
+      kv_input_pos->sizes().size(),
+      const_cast<TensorImpl::SizesType*>(kv_input_pos->sizes().data()),
+      &ptr->kv_input_pos,
+      const_cast<TensorImpl::DimOrderType*>(kv_input_pos->dim_order().data()));
+  input_tensors_[kv_forward_name_][0].push_back(kv_input_pos_.get());
 
-  // [I] kv_cache
-  int index = 3; // bypass input_tokens, input_pos, atten_mask
-  for (int offset = 0, shard_index = 0, v_stride = kv_cache_len_ * head_dim_;
-       shard_index < modules_.size();
-       offset += shard_layers_[shard_index], shard_index++) {
-    for (int cache_group = 0; cache_group < 2; ++cache_group) {
-      for (int layer = 0; layer < shard_layers_[shard_index]; ++layer) {
-        for (int head = 0; head < num_heads_; ++head, ++index) {
-          Result<TensorInfo> kv_cache =
-              methods_meta[shard_index]->input_tensor_meta(index);
-          std::vector<std::unique_ptr<TensorImpl>>& cache =
-              (cache_group == 0 ? k_cache_in_[kv_forward_name_]
-                                : v_cache_in_[kv_forward_name_]);
-          void* cache_ptr = (cache_group == 0)
-              ? static_cast<void*>(ptr->k_cache[layer + offset][head].data())
-              : static_cast<void*>(
-                    ptr->v_cache[layer + offset].data() + head * v_stride);
+  // When kv_cache_len_ is equal to 0, it means running in bert mode.
+  if (kv_cache_len_ > 0){
+    // [I] kv_cache
+    int index = 3; // bypass input_tokens, input_pos, atten_mask
+    for (int offset = 0, shard_index = 0, v_stride = kv_cache_len_ * head_dim_;
+        shard_index < modules_.size();
+        offset += shard_layers_[shard_index], shard_index++) {
+      for (int cache_group = 0; cache_group < 2; ++cache_group) {
+        for (int layer = 0; layer < shard_layers_[shard_index]; ++layer) {
+          for (int head = 0; head < num_heads_; ++head, ++index) {
+            Result<TensorInfo> kv_cache =
+                methods_meta[shard_index]->input_tensor_meta(index);
+            std::vector<std::unique_ptr<TensorImpl>>& cache =
+                (cache_group == 0 ? k_cache_in_[kv_forward_name_]
+                                  : v_cache_in_[kv_forward_name_]);
+            void* cache_ptr = (cache_group == 0)
+                ? static_cast<void*>(ptr->k_cache[layer + offset][head].data())
+                : static_cast<void*>(
+                      ptr->v_cache[layer + offset].data() + head * v_stride);
 
-          cache.emplace_back(std::make_unique<TensorImpl>(
-              kv_cache->scalar_type(),
-              kv_cache->sizes().size(),
-              const_cast<TensorImpl::SizesType*>(kv_cache->sizes().data()),
-              cache_ptr,
-              const_cast<TensorImpl::DimOrderType*>(
-                  kv_cache->dim_order().data())));
-          input_tensors_[kv_forward_name_][shard_index].push_back(
-              cache.back().get());
+            cache.emplace_back(std::make_unique<TensorImpl>(
+                kv_cache->scalar_type(),
+                kv_cache->sizes().size(),
+                const_cast<TensorImpl::SizesType*>(kv_cache->sizes().data()),
+                cache_ptr,
+                const_cast<TensorImpl::DimOrderType*>(
+                    kv_cache->dim_order().data())));
+            input_tensors_[kv_forward_name_][shard_index].push_back(
+                cache.back().get());
+          }
         }
       }
     }
@@ -251,39 +256,42 @@ void ShiftPointerIoMgr::prepare_kv_io(
   output_tensors_[kv_forward_name_][modules_.size() - 1].push_back(
       kv_logits_.get());
 
-  // [O] kv_cache
-  index = 1;
-  // Iterate through all kv cache outputs.
-  // For k, we store it in k_cache_out and update to k_cache later.
-  // For v, we append the output to the end of v_cache,
-  // which serves as both input and output.
-  for (int offset = 0, shard_index = 0, v_stride = kv_cache_len_ * head_dim_;
-       shard_index < modules_.size();
-       offset += shard_layers_[shard_index], shard_index++) {
-    for (int cache_group = 0; cache_group < 2; ++cache_group) {
-      for (int layer = 0; layer < shard_layers_[shard_index]; ++layer) {
-        for (int head = 0; head < num_heads_; ++head, ++index) {
-          Result<TensorInfo> kv_cache =
-              methods_meta[shard_index]->output_tensor_meta(index);
-          std::vector<std::unique_ptr<TensorImpl>>& cache =
-              (cache_group == 0 ? k_cache_out_[kv_forward_name_]
-                                : v_cache_out_[kv_forward_name_]);
-          void* cache_ptr = (cache_group == 0)
-              ? static_cast<void*>(
-                    ptr->k_cache_out[layer + offset].data() +
-                    (head * head_dim_))
-              : static_cast<void*>(
-                    ptr->v_cache[layer + offset].data() +
-                    (head + 1) * v_stride);
-          cache.emplace_back(std::make_unique<TensorImpl>(
-              kv_cache->scalar_type(),
-              kv_cache->sizes().size(),
-              const_cast<TensorImpl::SizesType*>(kv_cache->sizes().data()),
-              cache_ptr,
-              const_cast<TensorImpl::DimOrderType*>(
-                  kv_cache->dim_order().data())));
-          output_tensors_[kv_forward_name_][shard_index].push_back(
-              cache.back().get());
+  // When kv_cache_len_ is equal to 0, it means running in bert mode.
+  if (kv_cache_len_ > 0){
+    // [O] kv_cache
+    int index = 1;
+    // Iterate through all kv cache outputs.
+    // For k, we store it in k_cache_out and update to k_cache later.
+    // For v, we append the output to the end of v_cache,
+    // which serves as both input and output.
+    for (int offset = 0, shard_index = 0, v_stride = kv_cache_len_ * head_dim_;
+        shard_index < modules_.size();
+        offset += shard_layers_[shard_index], shard_index++) {
+      for (int cache_group = 0; cache_group < 2; ++cache_group) {
+        for (int layer = 0; layer < shard_layers_[shard_index]; ++layer) {
+          for (int head = 0; head < num_heads_; ++head, ++index) {
+            Result<TensorInfo> kv_cache =
+                methods_meta[shard_index]->output_tensor_meta(index);
+            std::vector<std::unique_ptr<TensorImpl>>& cache =
+                (cache_group == 0 ? k_cache_out_[kv_forward_name_]
+                                  : v_cache_out_[kv_forward_name_]);
+            void* cache_ptr = (cache_group == 0)
+                ? static_cast<void*>(
+                      ptr->k_cache_out[layer + offset].data() +
+                      (head * head_dim_))
+                : static_cast<void*>(
+                      ptr->v_cache[layer + offset].data() +
+                      (head + 1) * v_stride);
+            cache.emplace_back(std::make_unique<TensorImpl>(
+                kv_cache->scalar_type(),
+                kv_cache->sizes().size(),
+                const_cast<TensorImpl::SizesType*>(kv_cache->sizes().data()),
+                cache_ptr,
+                const_cast<TensorImpl::DimOrderType*>(
+                    kv_cache->dim_order().data())));
+            output_tensors_[kv_forward_name_][shard_index].push_back(
+                cache.back().get());
+          }
         }
       }
     }
@@ -355,11 +363,6 @@ void ShiftPointerIoMgr::prepare_prefill_io(
   int32_t prefill_v_stride =
       std::max(prefill_cache_len_, kv_cache_len_) * head_dim_;
 
-  if (eval_mode_ == EvalMode::kPrefill) {
-    ET_CHECK_MSG(
-        prefill_k_stride == prefill_v_stride,
-        "prefill_k_stride should be equal to prefill_v_stride");
-  }
   for (int offset = 0, shard_index = 0; shard_index < modules_.size();
        offset += shard_layers_[shard_index], shard_index++) {
     for (int cache_group = 0; cache_group < 2; ++cache_group) {
@@ -401,9 +404,9 @@ void ShiftPointerIoMgr::update_prefill_to_kv_io(
       prefill_cache_len_ != 0, "prefill_cache_len_ should not equal to 0");
   IO* ptr = static_cast<IO*>(data_ptr_.get());
 
-  ptr->input_tok =
+  ptr->kv_input_toks =
       use_int64_token_ ? cur_token : static_cast<int32_t>(cur_token);
-  ptr->input_pos = static_cast<int32_t>(pos);
+  ptr->kv_input_pos = static_cast<int32_t>(pos);
   // If prompt len is 30, prefill will handle to pos = 30.
   // At this point, pos should be 31.
   for (int i = 0; i < pos + 1; i++) {
@@ -458,10 +461,10 @@ void ShiftPointerIoMgr::update_kv_io(
     std::vector<std::vector<Tensor>>& output_tensors) {
   IO* ptr = static_cast<IO*>(data_ptr_.get());
   // update input_tok
-  ptr->input_tok =
+  ptr->kv_input_toks =
       use_int64_token_ ? cur_token : static_cast<int32_t>(cur_token);
   // update position_ids
-  ptr->input_pos = static_cast<int32_t>(pos);
+  ptr->kv_input_pos = static_cast<int32_t>(pos);
   // update causal mask for next token
   ptr->kv_attention_mask[kv_cache_len_ - pos] = 65535;
 
@@ -538,7 +541,7 @@ void ShiftPointerIoMgr::fill_prefill_toks(
 
 void ShiftPointerIoMgr::fill_kv_tok_mask(int64_t pos, int64_t cur_token) {
   IO* ptr = static_cast<IO*>(get_mutable_ptr());
-  ptr->input_tok =
+  ptr->kv_input_toks =
       use_int64_token_ ? cur_token : static_cast<int32_t>(cur_token);
   ptr->kv_attention_mask[kv_cache_len_] = 65535;
 }
@@ -774,16 +777,16 @@ void SmartMaskIoMgr::prepare_kv_io(
   std::unordered_map<std::string, size_t> io_bytes_map = get_io_bytes();
 
   // [I]: input_tokens
-  Result<TensorInfo> input_tok = methods_meta[0]->input_tensor_meta(0);
-  input_tok_ = std::make_unique<TensorImpl>(
+  Result<TensorInfo> kv_input_toks = methods_meta[0]->input_tensor_meta(0);
+  kv_input_toks_ = std::make_unique<TensorImpl>(
       input_tok->scalar_type(),
       input_tok->sizes().size(),
-      const_cast<TensorImpl::SizesType*>(input_tok->sizes().data()),
-      ptr->input_tok,
-      const_cast<TensorImpl::DimOrderType*>(input_tok->dim_order().data()));
-  input_tensors_[kv_forward_name_][0].push_back(input_tok_.get());
+      const_cast<TensorImpl::SizesType*>(kv_input_toks->sizes().data()),
+      ptr->kv_input_toks,
+      const_cast<TensorImpl::DimOrderType*>(kv_input_toks->dim_order().data()));
+  input_tensors_[kv_forward_name_][0].push_back(kv_input_toks_.get());
   ptr->add_custom_mem_info(
-      ptr->input_tok,
+      ptr->kv_input_toks,
       io_bytes_map["input_tok_bytes"],
       input_tok->scalar_type(),
       input_tok.get());
@@ -805,7 +808,7 @@ void SmartMaskIoMgr::prepare_kv_io(
 
   // [I]: input_pos
   Result<TensorInfo> input_pos = methods_meta[0]->input_tensor_meta(2);
-  input_pos_ = std::make_unique<TensorImpl>(
+  kv_input_pos_ = std::make_unique<TensorImpl>(
       input_pos->scalar_type(),
       input_pos->sizes().size(),
       const_cast<TensorImpl::SizesType*>(input_pos->sizes().data()),
@@ -1059,7 +1062,7 @@ void SmartMaskIoMgr::update_prefill_to_kv_io(
     std::vector<std::vector<Tensor>>& output_tensors) {
   IO* ptr = static_cast<IO*>(data_ptr_.get());
 
-  *ptr->input_tok =
+  *ptr->kv_input_toks =
       use_int64_token_ ? cur_token : static_cast<int32_t>(cur_token);
   *ptr->input_pos = static_cast<int32_t>(pos);
   // pos means the cur_token pos
@@ -1118,7 +1121,7 @@ void SmartMaskIoMgr::fill_prefill_toks(std::vector<uint64_t>& prompt_tokens) {
 
 void SmartMaskIoMgr::fill_kv_tok_mask(int64_t pos, int64_t cur_token) {
   IO* ptr = static_cast<IO*>(get_mutable_ptr());
-  *ptr->input_tok =
+  *ptr->kv_input_toks =
       use_int64_token_ ? cur_token : static_cast<int32_t>(cur_token);
   ptr->kv_attention_mask[kv_cache_len_] = 65535;
 }

@@ -23,8 +23,7 @@
 namespace example {
 
 enum EvalMode {
-  kPrefill = 0,
-  kKVCached,
+  kKVCached=0,
   kHybrid,
   kUnsupported,
 };
@@ -81,7 +80,10 @@ class ShiftPointerIoMgr : public IoMgrBase {
  public:
   ShiftPointerIoMgr(
       std::vector<std::shared_ptr<executorch::extension::Module>>& modules,
+      int32_t context_len,
+      int32_t prefill_ar_len,
       int32_t prefill_cache_len,
+      int32_t kv_ar_len,
       int32_t kv_cache_len,
       int32_t vocab_size,
       int32_t num_layers,
@@ -119,8 +121,8 @@ class ShiftPointerIoMgr : public IoMgrBase {
       std::vector<std::vector<executorch::aten::Tensor>>& output_tensors)
       override;
   struct IO {
-    int64_t input_tok;
-    int32_t input_pos;
+    std::vector<int64_t> kv_input_toks;
+    std::vector<int32_t> kv_input_pos;
     std::vector<std::vector<std::vector<uint8_t>>> k_cache;
     std::vector<std::vector<uint8_t>> v_cache;
     std::vector<std::vector<uint8_t>> k_cache_out;
@@ -132,10 +134,9 @@ class ShiftPointerIoMgr : public IoMgrBase {
   };
 
  private:
-  std::unique_ptr<executorch::aten::TensorImpl> input_tok_;
-  std::unique_ptr<executorch::aten::TensorImpl> input_pos_;
-  std::unique_ptr<executorch::aten::TensorImpl> hidden_state_;
-  std::unique_ptr<executorch::aten::TensorImpl> attention_mask_;
+  std::unique_ptr<executorch::aten::TensorImpl> kv_input_toks_;
+  std::unique_ptr<executorch::aten::TensorImpl> kv_input_pos_;
+  std::unique_ptr<executorch::aten::TensorImpl> kv_attention_mask_;
   std::unique_ptr<executorch::aten::TensorImpl> prefill_input_toks_;
   std::unique_ptr<executorch::aten::TensorImpl> prefill_attn_mask_;
   std::unique_ptr<executorch::aten::TensorImpl> prefill_logits_;
@@ -157,7 +158,10 @@ class ShiftPointerIoMgr : public IoMgrBase {
       v_cache_out_;
   std::unique_ptr<executorch::aten::TensorImpl> kv_logits_;
   std::vector<int> shard_layers_;
+  int32_t context_len_{0};
+  int32_t kv_ar_len_{0};
   int32_t kv_cache_len_{0};
+  int32_t prefill_ar_len_{0};
   int32_t prefill_cache_len_{0};
   int32_t vocab_size_;
   int32_t num_layers_;
@@ -216,8 +220,8 @@ class SmartMaskIoMgr : public IoMgrBase {
 
   struct IO {
     void* shared_buffer_base;
-    int64_t* input_tok;
-    int32_t* input_pos;
+    int64_t* kv_input_toks;
+    int32_t* kv_input_pos;
     // layer -> head -> head_dim * seq_len
     std::vector<std::vector<uint8_t*>> k_cache;
     std::vector<std::vector<uint8_t*>> v_cache;
@@ -252,10 +256,9 @@ class SmartMaskIoMgr : public IoMgrBase {
   };
 
  private:
-  std::unique_ptr<executorch::aten::TensorImpl> input_tok_;
-  std::unique_ptr<executorch::aten::TensorImpl> input_pos_;
-  std::unique_ptr<executorch::aten::TensorImpl> hidden_state_;
-  std::unique_ptr<executorch::aten::TensorImpl> attention_mask_;
+  std::unique_ptr<executorch::aten::TensorImpl> kv_input_tok_;
+  std::unique_ptr<executorch::aten::TensorImpl> kv_input_pos_;
+  std::unique_ptr<executorch::aten::TensorImpl> kv_attention_mask_;
   std::unique_ptr<executorch::aten::TensorImpl> prefill_input_toks_;
   std::unique_ptr<executorch::aten::TensorImpl> prefill_attn_mask_;
   std::unique_ptr<executorch::aten::TensorImpl> prefill_logits_;
@@ -277,7 +280,10 @@ class SmartMaskIoMgr : public IoMgrBase {
       v_cache_out_;
   std::unique_ptr<executorch::aten::TensorImpl> kv_logits_;
   std::vector<int> shard_layers_;
+  int32_t context_len_{0};
+  int32_t kv_ar_len_{0};
   int32_t kv_cache_len_{0};
+  int32_t prefill_ar_len_{0};
   int32_t prefill_cache_len_{0};
   int32_t vocab_size_;
   int32_t num_layers_;
