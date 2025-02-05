@@ -465,9 +465,7 @@ def compile(args, pte_filename, tokenizer):
         # TODO: support batch inputs if necessary
         kv_config.max_batch_size = 1
         kv_config.max_seq_len = args.max_seq_len
-        # When the context length is equal to the auto-regression (AR) length,
-        # it means running in bert mode.
-        kv_config.use_kv_cache = False if args.max_seq_len == args.kv_ar_len else True
+        kv_config.use_kv_cache = True
 
         prefill_config = copy.copy(kv_config)
         prefill_config.max_seq_len = args.max_seq_len
@@ -482,11 +480,11 @@ def compile(args, pte_filename, tokenizer):
     with torch.device("meta"):
         if args.model_mode == "kv":
             llama_instance_list.append(
-                LlamaModel(kv_config, ar_len=args.kv_ar_len, output_new_cache_only=True, output_cache=False if args.max_seq_len == args.kv_ar_len else True, use_i64_token=use_i64_token)
+                LlamaModel(kv_config, ar_len=1, output_new_cache_only=True, output_cache=True, use_i64_token=use_i64_token)
             )
         elif args.model_mode == "hybrid":
             llama_instance_list.append(
-                LlamaModel(kv_config, ar_len=args.kv_ar_len, output_new_cache_only=True, output_cache=True, use_i64_token=use_i64_token)
+                LlamaModel(kv_config, ar_len=1, output_new_cache_only=True, output_cache=True, use_i64_token=use_i64_token)
             )
             llama_instance_list.append(
                 LlamaModel(prefill_config, ar_len=args.prefill_ar_len, output_new_cache_only=True, output_cache=True,use_i64_token=use_i64_token)
@@ -954,13 +952,6 @@ def _build_parser():
     )
 
     parser.add_argument(
-        "--kv_ar_len",
-        help="The auto-regression (AR) length determines the number of tokens to consume and the number of logits to produce. Use this option for kv or hybrid mode",
-        default=1,
-        type=int,
-    )
-
-    parser.add_argument(
         "--kv_updater",
         help="Choose how to update kv cache during runtime",
         choices=["smart_mask", "shift_pointer"],
@@ -987,14 +978,11 @@ def main(args) -> None:
         exit("Cannot set both compile_only and pre_gen_pte as true")
 
     if args.model_mode == "kv":
-        assert (
-            args.max_seq_len >= args.kv_ar_len
-        ), "Please ensure max_seq_len is >= kv_ar_len"
         pte_filename = "kv_llama_qnn"
     elif args.model_mode == "hybrid":
         assert (
-            args.max_seq_len >= args.prefill_ar_len and args.max_seq_len >= args.kv_ar_len
-        ), "Please ensure max_seq_len is >= prefill_ar_len and >= kv_ar_len"
+            args.max_seq_len >= args.prefill_ar_len
+        ), "Please ensure max_seq_len is >= prefill_ar_len"
         pte_filename = "hybrid_llama_qnn"
     else:
         raise RuntimeError(f"Unknown model_mode: {args.model_mode}.")
