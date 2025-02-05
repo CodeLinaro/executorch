@@ -101,15 +101,16 @@ Error Runner::load() {
   }
 
   if (!prefill_forward_name_.empty()) {
-    // Use input tokens length to retrieve prefill cache len
-    // Cache len equals to prefill model seq_len - 1
-    prefill_cache_len_ = get_methods_meta(prefill_forward_name_)[0]
-                             ->input_tensor_meta(0)
-                             ->sizes()[1];
+    // Use attention mask length to retrieve prefill_ar_len and context length
+    // Prefill cache length equals to context_len - prefill_ar_len
+    auto atten_mask_meta = get_methods_meta(prefill_forward_name_)[0]->input_tensor_meta(1);
+    prefill_ar_len_ = atten_mask_meta->sizes()[1];
+    context_len_ = atten_mask_meta->sizes()[2];
+    prefill_cache_len_ = context_len_ - prefill_ar_len_;
   }
   if (!kv_forward_name_.empty()) {
     // Use attention mask length to retrieve kv ar len and context length
-    // Cache len equals to kv model max_seq_len - kv_ar_len
+    // Cache len equals to kv model context_len - kv_ar_len
     auto atten_mask_meta = get_methods_meta(kv_forward_name_)[0]->input_tensor_meta(1);
     kv_ar_len_ = atten_mask_meta->sizes()[1];
     context_len_ = atten_mask_meta->sizes()[2];
@@ -146,7 +147,10 @@ Error Runner::load() {
   } else if (kv_updater_ == "ShiftPointer") {
     io_mgr_ = std::make_unique<ShiftPointerIoMgr>(
         modules_,
+        context_len_,
+        prefill_ar_len_,
         prefill_cache_len_,
+        kv_ar_len_,
         kv_cache_len_,
         vocab_size_,
         num_layers,
@@ -321,8 +325,7 @@ Error Runner::generate(
       break;
   }
 
-  int max_seq_len = std::max(prefill_cache_len_, kv_cache_len_) + 1;
-  seq_len = (seq_len > 0 && seq_len <= max_seq_len) ? seq_len : max_seq_len;
+  seq_len = (seq_len > 0 && seq_len <= context_len_) ? seq_len : context_len_;
   Result<std::vector<uint64_t>> encode_res =
       tokenizer_->encode(prompt_, n_bos_, 0);
   ET_CHECK_OK_OR_RETURN_ERROR(
@@ -330,7 +333,6 @@ Error Runner::generate(
 
   std::vector<uint64_t> prompt_tokens = encode_res.get();
   int num_prompt_tokens = prompt_tokens.size();
-  ET_CHECK_MSG(num_prompt_tokens < max_seq_len, "max seq length exceeded");
   ET_CHECK_MSG(
       num_prompt_tokens < seq_len,
       "sequence length exceeded - please increase the seq_len value");
@@ -351,40 +353,54 @@ Error Runner::generate(
     token_callback(prompt_);
   }
   auto prefill_execute = [&](const std::string& method_name) {
-    io_mgr_->fill_prefill_toks(prompt_tokens);
+    int num_iters = 1 + ((num_prompt_tokens - 1) / prefill_ar_len_);
+    ET_LOG(Info, "Prompt Processor: total %d tokens (AR-%d * %d iters)", num_prompt_tokens, prefill_ar_len_, num_iters);
 
+    for (int i = 0; i < num_iters; i++) {
+      io_mgr_->fill_prefill_toks(pos, prompt_tokens);
+      run_model_step(method_name, inputs[method_name]);
+      pos += prefill_ar_len_;
+      io_mgr_->update_prefill_io(cur_token, pos, output_tensors[method_name]);
+    }
     pos = num_prompt_tokens - 1;
     cur_token = prompt_tokens[pos];
-    while (pos < seq_len - 1) {
-      // inference
-      run_model_step(method_name, inputs[method_name]);
-      Tensor& logits_tensor = output_tensors[method_name].back()[0];
-      prev_token = cur_token;
-      long sample_start_time_ms = time_in_ms();
-      cur_token = logitsToToken(logits_tensor, pos);
-      stats_.aggregate_sampling_time_ms += time_in_ms() - sample_start_time_ms;
+    stats_.first_token_ms = time_in_ms();
+    stats_.prompt_eval_end_ms = time_in_ms();
 
-      io_mgr_->update_prefill_io(cur_token, ++pos, output_tensors[method_name]);
-      auto piece_res = tokenizer_->decode(prev_token, cur_token);
-      ET_CHECK(piece_res.ok());
-      if (token_callback) {
-        token_callback(piece_res.get().c_str());
-      }
+    // io_mgr_->fill_prefill_toks(prompt_tokens);
 
-      if (pos == num_prompt_tokens) {
-        stats_.first_token_ms = time_in_ms();
-        stats_.prompt_eval_end_ms = time_in_ms();
-      }
+    // pos = num_prompt_tokens - 1;
+    // cur_token = prompt_tokens[pos];
+    // while (pos < seq_len - 1) {
+    //   // inference
+    //   run_model_step(method_name, inputs[method_name]);
+    //   Tensor& logits_tensor = output_tensors[method_name].back()[0];
+    //   prev_token = cur_token;
+    //   long sample_start_time_ms = time_in_ms();
+    //   cur_token = logitsToToken(logits_tensor, pos);
+    //   stats_.aggregate_sampling_time_ms += time_in_ms() - sample_start_time_ms;
 
-      if (pos >= num_prompt_tokens && eos_id_.count(cur_token) > 0) {
-        ET_LOG(Info, "\nReached to the end of generation");
-        break;
-      }
-      // prefill model inferences once for prompt in the hybrid mode
-      if (eval_mode_ == EvalMode::kHybrid) {
-        break;
-      }
-    }
+    //   io_mgr_->update_prefill_io(cur_token, ++pos, output_tensors[method_name]);
+    //   auto piece_res = tokenizer_->decode(prev_token, cur_token);
+    //   ET_CHECK(piece_res.ok());
+    //   if (token_callback) {
+    //     token_callback(piece_res.get().c_str());
+    //   }
+
+    //   if (pos == num_prompt_tokens) {
+    //     stats_.first_token_ms = time_in_ms();
+    //     stats_.prompt_eval_end_ms = time_in_ms();
+    //   }
+
+    //   if (pos >= num_prompt_tokens && eos_id_.count(cur_token) > 0) {
+    //     ET_LOG(Info, "\nReached to the end of generation");
+    //     break;
+    //   }
+    //   // prefill model inferences once for prompt in the hybrid mode
+    //   if (eval_mode_ == EvalMode::kHybrid) {
+    //     break;
+    //   }
+    // }
   };
 
   auto kv_execute = [&](const std::string& method_name) {

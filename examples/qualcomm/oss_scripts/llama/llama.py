@@ -779,7 +779,7 @@ def inference(args, quant_attrs, pte_filename, runtime_tokenizer_path, pre_gen_p
             f"--system_prompt '{args.system_prompt}'",
             f"--logits_scale {quant_attrs['scale']}",
             f"--logits_offset {quant_attrs['zero_point']}",
-            f"--kv_updator {'SmartMask' if args.kv_updater == smart_mask_updater else 'ShiftPointer'}",
+            f"--kv_updater {'SmartMask' if args.kv_updater == smart_mask_updater else 'ShiftPointer'}",
         ]
     )
     runner_cmd = " ".join(

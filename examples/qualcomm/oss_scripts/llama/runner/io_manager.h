@@ -41,7 +41,7 @@ class IoMgrBase {
       const std::vector<
           executorch::runtime::Result<executorch::runtime::MethodMeta>>&
           methods_meta) = 0;
-  virtual void fill_prefill_toks(std::vector<uint64_t>& prompt_tokens) = 0;
+  virtual void fill_prefill_toks(int64_t start_pos, std::vector<uint64_t>& prompt_tokens) = 0;
   virtual void fill_kv_tok_mask(int64_t pos, int64_t cur_token) = 0;
   virtual void update_prefill_to_kv_io(
       int64_t cur_token,
@@ -103,7 +103,7 @@ class ShiftPointerIoMgr : public IoMgrBase {
       const std::vector<
           executorch::runtime::Result<executorch::runtime::MethodMeta>>&
           methods_meta) override;
-  void fill_prefill_toks(std::vector<uint64_t>& prompt_tokens) override;
+  void fill_prefill_toks(int64_t start_pos, std::vector<uint64_t>& prompt_tokens) override;
   void fill_kv_tok_mask(int64_t pos, int64_t cur_token) override;
   void update_prefill_to_kv_io(
       int64_t cur_token,
@@ -121,15 +121,16 @@ class ShiftPointerIoMgr : public IoMgrBase {
       std::vector<std::vector<executorch::aten::Tensor>>& output_tensors)
       override;
   struct IO {
-    std::vector<int64_t> kv_input_toks;
-    std::vector<int32_t> kv_input_pos;
+    int64_t kv_input_toks;
+    int32_t kv_input_pos;
     std::vector<std::vector<std::vector<uint8_t>>> k_cache;
     std::vector<std::vector<uint8_t>> v_cache;
     std::vector<std::vector<uint8_t>> k_cache_out;
     std::vector<uint16_t> kv_attention_mask;
     std::vector<uint16_t> kv_logits;
     std::vector<int64_t> prefill_input_toks;
-    std::vector<uint16_t> prefill_atten_mask;
+    std::vector<int32_t> prefill_input_pos;
+    std::vector<uint16_t> prefill_attention_mask;
     std::vector<uint16_t> prefill_logits;
   };
 
@@ -138,7 +139,8 @@ class ShiftPointerIoMgr : public IoMgrBase {
   std::unique_ptr<executorch::aten::TensorImpl> kv_input_pos_;
   std::unique_ptr<executorch::aten::TensorImpl> kv_attention_mask_;
   std::unique_ptr<executorch::aten::TensorImpl> prefill_input_toks_;
-  std::unique_ptr<executorch::aten::TensorImpl> prefill_attn_mask_;
+  std::unique_ptr<executorch::aten::TensorImpl> prefill_input_pos_;
+  std::unique_ptr<executorch::aten::TensorImpl> prefill_attention_mask_;
   std::unique_ptr<executorch::aten::TensorImpl> prefill_logits_;
   std::unordered_map<
       std::string,
@@ -177,7 +179,10 @@ class SmartMaskIoMgr : public IoMgrBase {
  public:
   SmartMaskIoMgr(
       std::vector<std::shared_ptr<executorch::extension::Module>>& modules,
+      int32_t context_len,
+      int32_t prefill_ar_len,
       int32_t prefill_cache_len,
+      int32_t kv_ar_len,
       int32_t kv_cache_len,
       int32_t vocab_size,
       int32_t num_layers,
@@ -197,7 +202,7 @@ class SmartMaskIoMgr : public IoMgrBase {
       const std::vector<
           executorch::runtime::Result<executorch::runtime::MethodMeta>>&
           methods_meta) override;
-  void fill_prefill_toks(std::vector<uint64_t>& prompt_tokens) override;
+  void fill_prefill_toks(int64_t start_pos, std::vector<uint64_t>& prompt_tokens) override;
   void fill_kv_tok_mask(int64_t pos, int64_t cur_token) override;
   void update_prefill_to_kv_io(
       int64_t cur_token,
@@ -234,7 +239,7 @@ class SmartMaskIoMgr : public IoMgrBase {
     uint16_t* kv_logits;
     int64_t* prefill_input_toks;
     // prefill_cache_len_ ^ 2
-    uint16_t* prefill_atten_mask;
+    uint16_t* prefill_attention_mask;
     // vocab_size * prefill_cache_len_
     uint16_t* prefill_logits;
 
@@ -256,11 +261,11 @@ class SmartMaskIoMgr : public IoMgrBase {
   };
 
  private:
-  std::unique_ptr<executorch::aten::TensorImpl> kv_input_tok_;
+  std::unique_ptr<executorch::aten::TensorImpl> kv_input_toks_;
   std::unique_ptr<executorch::aten::TensorImpl> kv_input_pos_;
   std::unique_ptr<executorch::aten::TensorImpl> kv_attention_mask_;
   std::unique_ptr<executorch::aten::TensorImpl> prefill_input_toks_;
-  std::unique_ptr<executorch::aten::TensorImpl> prefill_attn_mask_;
+  std::unique_ptr<executorch::aten::TensorImpl> prefill_attention_mask_;
   std::unique_ptr<executorch::aten::TensorImpl> prefill_logits_;
   std::unordered_map<
       std::string,
