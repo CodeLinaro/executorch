@@ -34,7 +34,7 @@ class PyQnnManager {
     auto qnn_executorch_options = GetQnnExecuTorchOptions(
         qnn_executorch_option_ptr_.cast<std::string_view>().data());
     qnn_manager_ = std::make_shared<QnnManager>(
-        qnn_executorch_options, qnn_executorch_context_binary_);
+        qnn_executorch_options, qnn_executorch_context_binary_, false);
   }
 
   // used for loading context binary directly
@@ -47,7 +47,7 @@ class PyQnnManager {
     qnn_executorch_context_binary_.buffer = info.ptr;
     qnn_executorch_context_binary_.nbytes = info.size * info.itemsize;
     qnn_manager_ = std::make_shared<QnnManager>(
-        qnn_executorch_options, qnn_executorch_context_binary_);
+        qnn_executorch_options, qnn_executorch_context_binary_, false);
   }
 
   // used during stage 2 of multi-graph mode
@@ -160,7 +160,7 @@ class PyQnnManager {
     qnn_executorch_context_binary_ =
         MakeQcirCustomBinaryInfo(qcir_bin, tensor_data);
     qnn_manager_ = std::make_shared<QnnManager>(
-        qnn_executorch_options, qnn_executorch_context_binary_);
+        qnn_executorch_options, qnn_executorch_context_binary_, false);
   }
 
   executorch::runtime::Error Init() {
@@ -195,7 +195,7 @@ class PyQnnManager {
       std::vector<std::shared_ptr<OpWrapper>>& op_wrappers) {
     QnnExecuTorchContextBinary binary_info;
 
-    if (qnn_manager_->IsOnlinePrepare() || qnn_manager_->IsMultipleGraphs()) {
+    if (qnn_manager_->IsMultipleGraphs()) {
       builder_.Reset();
       std::vector<uint8_t> tensor_data;
       std::vector<uint64_t> offsets;
@@ -305,8 +305,11 @@ class PyQnnManager {
         QNN_EXECUTORCH_LOG_ERROR("Fail to compile QNN graph");
         return py::array_t<char>(0);
       }
-      if (qnn_manager_->GetContextBinary(binary_info) !=
-          executorch::runtime::Error::Ok) {
+      auto qnn_executorch_options = GetQnnExecuTorchOptions(
+          qnn_executorch_option_ptr_.cast<std::string_view>().data());
+      if (qnn_executorch_options->saver() ||
+          qnn_manager_->GetContextBinary(binary_info) !=
+              executorch::runtime::Error::Ok) {
         return py::array_t<char>(0);
       }
     }

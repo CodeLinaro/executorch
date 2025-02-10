@@ -7,11 +7,16 @@
  */
 
 #include <executorch/backends/qualcomm/runtime/backends/QnnContextCommon.h>
+
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <fstream>
+
 namespace executorch {
 namespace backends {
 namespace qnn {
-
-using executorch::runtime::Error;
 
 QnnContext::~QnnContext() {
   const QnnInterface& qnn_interface = implementation_.GetQnnInterface();
@@ -29,6 +34,62 @@ QnnContext::~QnnContext() {
     }
     handle_ = nullptr;
   }
+}
+
+Error QnnContext::RegisterGraphsFromDLC() {
+  const QnnExecuTorchContextBinary& qnn_context_blob =
+      cache_->GetQnnContextBlob();
+
+  int fd = memfd_create("tmp.dlc", 0);
+  if (fd == -1) {
+    perror("memfd_create fail");
+    return Error::Internal;
+  }
+
+  if (ftruncate(fd, qnn_context_blob.nbytes) == -1) {
+    perror("ftruncate fail");
+    close(fd);
+    return Error::Internal;
+  }
+
+  void* addr = mmap(
+      NULL, qnn_context_blob.nbytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  if (addr == MAP_FAILED) {
+    perror("mmap");
+    close(fd);
+    return Error::Internal;
+  }
+
+  memcpy(addr, qnn_context_blob.buffer, qnn_context_blob.nbytes);
+
+  char dlc_path[256];
+  snprintf(dlc_path, sizeof(dlc_path), "/proc/self/fd/%d", fd);
+
+  const QNN_INTERFACE_VER_TYPE& interfaceVer =
+      implementation_.GetQnnInterface().GetInterfaceVer();
+  // compose graph from dlc
+  if (QnnModel_composeGraphsFromDlc(
+          /*backendHandle=*/backend_->GetHandle(),
+          /*interface=*/interfaceVer,
+          /*contextHandle=*/GetHandle(),
+          /*graphsConfigInfo=*/nullptr,
+          /*dlcPath=*/dlc_path,
+          /*numGraphsConfigInfo=*/0,
+          /*graphsInfo=*/&p_graph_info_,
+          /*numGraphsInfo=*/&graph_info_num_,
+          /*debug=*/false,
+          /*logCallback=*/nullptr,
+          /*maxLogLevel=*/QNN_LOG_LEVEL_VERBOSE) != QNN_SUCCESS) {
+    QNN_EXECUTORCH_LOG_ERROR("Failed to open Dlc");
+    return Error::Internal;
+  }
+
+  for (uint32_t i = 0; i < graph_info_num_; ++i) {
+    auto& graphInfo = (*p_graph_info_)[i];
+    cache_->SetGraphNames(graphInfo.graphName);
+  }
+
+  return Error::Ok;
 }
 
 Error QnnContext::Configure() {
@@ -63,13 +124,13 @@ Error QnnContext::Configure() {
     }
   } else if (
       cache_->GetCacheState() == QnnBackendCache::SERIALIZE ||
-      cache_->GetCacheState() == QnnBackendCache::ONLINE_PREPARE) {
+      cache_->GetCacheState() == QnnBackendCache::ONLINE_PREPARE ||
+      cache_->GetCacheState() == QnnBackendCache::MULTI_GRAPH) {
     error = qnn_interface.qnn_context_create(
         backend_->GetHandle(),
         device_->GetHandle(),
         temp_context_config.empty() ? nullptr : temp_context_config.data(),
         &handle_);
-
     if (error != QNN_SUCCESS) {
       QNN_EXECUTORCH_LOG_ERROR(
           "Failed to create QNN context for Backend "
@@ -82,9 +143,40 @@ Error QnnContext::Configure() {
     QNN_EXECUTORCH_LOG_ERROR("QNN context cache is invalid.");
     return Error::Internal;
   }
-  return AfterConfigure();
+  if (AfterConfigure() != Error::Ok) {
+    return Error::Internal;
+  }
+  if (cache_->GetCacheState() == QnnBackendCache::ONLINE_PREPARE) {
+    return RegisterGraphsFromDLC();
+  }
+  return Error::Ok;
 }
 
+Error QnnContext::GetContextBinaryFromDLC(
+    QnnExecuTorchContextBinary& qnn_executorch_context_binary) {
+  // qnn_context_get_binary is not supported on IrBackend
+  // read DLC and write to buffer
+  auto dlc_name = GetGraphNames()[0] + ".dlc";
+  std::ifstream dlc_file(dlc_name, std::ios::binary | std::ios::ate);
+  if (dlc_file.is_open()) {
+    std::streamsize size = dlc_file.tellg();
+    dlc_file.seekg(0, std::ios::beg);
+
+    auto buffer = std::make_shared<std::vector<char>>(size);
+    dlc_file.read(buffer->data(), size);
+    dlc_file.close();
+    qnn_executorch_context_binary.buffer = buffer->data();
+    qnn_executorch_context_binary.nbytes = size;
+    static std::shared_ptr<std::vector<char>> static_buffer = buffer;
+    return Error::Ok;
+  } else {
+    QNN_EXECUTORCH_LOG_ERROR(
+        "Unable to open dlc file %s for building QnnExecuTorchContextBinary",
+        dlc_name.c_str());
+  }
+  return Error::Internal;
+}
+// std::vector<char> buffer(size);
 Error QnnContext::GetContextBinary(
     QnnExecuTorchContextBinary& qnn_executorch_context_binary) {
   const QnnInterface& qnn_interface = implementation_.GetQnnInterface();

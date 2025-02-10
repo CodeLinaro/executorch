@@ -14,9 +14,11 @@
 #include <vector>
 
 #include "HTP/QnnHtpCommon.h"
+#include "IR/QnnIrCommon.h"
 #include "QnnBackend.h"
 #include "QnnCommon.h"
 #include "QnnTypes.h"
+#include "Saver/QnnSaverCommon.h"
 namespace executorch {
 namespace backends {
 namespace qnn {
@@ -45,11 +47,16 @@ class QnnBackend {
     return handle_;
   }
 
-  executorch::runtime::Error VerifyQNNSDKVersion(
-      const QnnExecuTorchBackendType backend_id);
+  executorch::runtime::Error VerifyQNNSDKVersion();
 
  protected:
-  virtual Qnn_Version_t GetExpectedBackendVersion() const = 0;
+  virtual Qnn_Version_t GetExpectedBackendVersion() {
+    Qnn_Version_t backend_version;
+    backend_version.major = QNN_IR_API_VERSION_MAJOR;
+    backend_version.minor = QNN_IR_API_VERSION_MINOR;
+    backend_version.patch = QNN_IR_API_VERSION_PATCH;
+    return backend_version;
+  }
   virtual executorch::runtime::Error MakeConfig(
       std::vector<const QnnBackend_Config_t*>& config) {
     return executorch::runtime::Error::Ok;
