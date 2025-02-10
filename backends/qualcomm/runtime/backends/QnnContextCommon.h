@@ -14,6 +14,23 @@
 #include <executorch/backends/qualcomm/runtime/backends/QnnDeviceCommon.h>
 
 #include <memory>
+
+#include "QnnWrapperUtils.hpp"
+extern "C" {
+qnn_wrapper_api::ModelError_t QnnModel_composeGraphsFromDlc(
+    Qnn_BackendHandle_t backendHandle,
+    QNN_INTERFACE_VER_TYPE interface,
+    Qnn_ContextHandle_t contextHandle,
+    const qnn_wrapper_api::GraphConfigInfo_t** graphsConfigInfo,
+    const char* dlcPath,
+    const uint32_t numGraphsConfigInfo,
+    qnn_wrapper_api::GraphInfoPtr_t** graphsInfo,
+    uint32_t* numGraphsInfo,
+    bool debug,
+    QnnLog_Callback_t logCallback,
+    QnnLog_Level_t maxLogLevel);
+}
+
 namespace executorch {
 namespace backends {
 namespace qnn {
@@ -31,6 +48,10 @@ class QnnContext {
         cache_(cache) {}
 
   virtual ~QnnContext();
+  executorch::runtime::Error RegisterGraphsFromDLC();
+  qnn_wrapper_api::GraphInfoPtr_t* p_graph_info_;
+  uint32_t graph_info_num_ = 0;
+
   executorch::runtime::Error Configure();
 
   Qnn_ContextHandle_t GetHandle() const {
@@ -53,7 +74,9 @@ class QnnContext {
     return cache_->GetCacheState();
   };
 
-  executorch::runtime::Error GetContextBinary(
+  virtual executorch::runtime::Error GetContextBinary(
+      QnnExecuTorchContextBinary& qnn_executorch_context_binary);
+  executorch::runtime::Error GetContextBinaryFromDLC(
       QnnExecuTorchContextBinary& qnn_executorch_context_binary);
 
  protected:
