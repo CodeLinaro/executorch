@@ -80,6 +80,7 @@ def get_passes_dependency_for_capture_program():
         ConvertConv1dToConv2d,
         DecomposeAny,
         DecomposeLinalgVectorNorm,
+        ExpandBroadcastDimBeforeTiling,
         ExpandBroadcastTensorShape,
         FixedLinearKeepDim,
         FoldQDQ,
@@ -104,6 +105,7 @@ def get_passes_dependency_for_capture_program():
         ConvertConv1dToConv2d: [FoldQDQ],
         DecomposeAny: [RemoveRedundancy],
         DecomposeLinalgVectorNorm: [RemoveRedundancy],
+        ExpandBroadcastDimBeforeTiling: [RemoveRedundancy],
         ExpandBroadcastTensorShape: [RemoveRedundancy],
         FixedLinearKeepDim: [FoldQDQ],
         FoldQDQ: [AnnotateQuantAttrs, AnnotateStack, AnnotateUnbind],
@@ -111,6 +113,7 @@ def get_passes_dependency_for_capture_program():
         LayoutTransform: [
             AnnotateQuantAttrs,
             ConvertConv1dToConv2d,
+            ExpandBroadcastDimBeforeTiling,
             ExpandBroadcastTensorShape,
             FixedLinearKeepDim,
         ],

@@ -422,9 +422,13 @@ class TestQNNFloatingPointOperator(TestQNN):
 
     def test_qnn_backend_expand(self):
         modules = [ExpandAs(), ExpandCopy()]  # noqa: F405
-        sample_input = (torch.randn([3, 1]),)
+        sample_inputs = [
+            (torch.randn([3, 1]),),
+            (torch.randn([4]),),
+        ]
         for i, module in enumerate(modules):
             with self.subTest(i=i):
+                sample_input = sample_inputs[i]
                 self.lower_module_and_test_output(module, sample_input)
 
     def test_qnn_backend_expm1(self):
@@ -1491,9 +1495,13 @@ class TestQNNQuantizedOperator(TestQNN):
 
     def test_qnn_backend_expand(self):
         modules = [ExpandAs(), ExpandCopy()]  # noqa: F405
-        sample_input = (torch.randn([3, 1]),)
+        sample_inputs = [
+            (torch.randn([3, 1]),),
+            (torch.randn([4]),),
+        ]
         for i, module in enumerate(modules):
             with self.subTest(i=i):
+                sample_input = sample_inputs[i]
                 module = self.get_qdq_module(module, sample_input)
                 self.lower_module_and_test_output(module, sample_input)
 
