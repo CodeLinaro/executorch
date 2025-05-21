@@ -132,8 +132,6 @@ def annotate_single_in_single_out(
     if _is_annotated([node]):
         return
 
-    if 'torch_fn' in node.meta and node.meta['torch_fn'][0] == "view_67":
-        import pdb; pdb.set_trace()
     input_qspec_map = {}
     if _is_float_tensor(node.args[0]):
         input_act = node.args[0]

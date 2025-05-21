@@ -1103,23 +1103,11 @@ class TestQNNQuantizedOperator(TestQNN):
 
         # module = _replace_position_bucket(module)
         text = "Studies have been shown that owning a dog is good for you"
-        # input_ids = tokenizer(
-        #     "Studies have been shown that owning a dog is good for you", return_tensors="pt"
-        # ).input_ids.to(torch.int32)
+        input_ids = tokenizer(text, return_tensors="pt").input_ids.to(torch.int32)
         decoder_input_ids = tokenizer("Studies show that", return_tensors="pt").input_ids.to(torch.int32)
-        # inputs = (input_ids, None, decoder_input_ids)
         
-        encoded_inputs = tokenizer(text, return_tensors="pt")
-        inputs = (
-                encoded_inputs["input_ids"].to(torch.int32),
-                encoded_inputs["attention_mask"].to(torch.int32),
-                decoder_input_ids,
-        )
-        
-        
-        
-        sample_input = (inputs, )
-        # module(input_ids, None, decoder_input_ids)
+        sample_input = ((input_ids, None, decoder_input_ids), )
+
         module = self.get_qdq_module(module, sample_input[0], quant_dtype=QuantDtype.use_16a4w)
         self.lower_module_and_test_output(module, sample_input[0])
 
@@ -1131,9 +1119,9 @@ class TestQNNQuantizedOperator(TestQNN):
         self.lower_module_and_test_output(module, sample_input)
         
     # TODO: repo for quant annotater bug    
-    def test_qnn_backend_ga1_lift_edgecase(self):
-        module = Ga1LiftEdgeCase()
-        sample_input = (torch.randn([15, 15], dtype=torch.float32),)
+    def test_qnn_backend_ga2_lift_edgecase(self):
+        module = Ga1LiftEdgeCase2()
+        sample_input = (torch.randn([1, 8, 15, 64], dtype=torch.float32),)
         module = self.get_qdq_module(module, sample_input)
         self.lower_module_and_test_output(module, sample_input)
 

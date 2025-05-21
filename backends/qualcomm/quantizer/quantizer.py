@@ -195,6 +195,7 @@ class QnnQuantizer(Quantizer):
 
     def _annotate(self, gm: GraphModule) -> None:
         for node in gm.graph.nodes:
+            print(f"Start of _annotate: {node}")
             if node.name in self.discard_nodes:
                 continue
             
@@ -203,6 +204,9 @@ class QnnQuantizer(Quantizer):
             print(f"Done_get_quant_config: {node}")
             if quant_config:
                 OP_ANNOTATOR[node.target](node, quant_config)
+            print(f"End of _annotate: {node}")
+            if "torch_fn" in node.meta and node.meta["torch_fn"][0] == "contiguous_18":
+                import pdb; pdb.set_trace()
 
     def _annotate_custom_annotation(self, gm: GraphModule) -> None:
         for annotation_func in self.custom_quant_annotations:

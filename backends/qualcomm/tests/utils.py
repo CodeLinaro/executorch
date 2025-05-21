@@ -516,20 +516,16 @@ class TestQNN(unittest.TestCase):
         block_size_map: Dict[str, Tuple] = None,
         submodule_qconfig_list: Optional[List[Tuple[Callable, ModuleQConfig]]] = None,
     ) -> torch.fx.GraphModule:
-        with torch.no_grad():
-            m = (
-                torch.export.export(
-                    module, inputs, dynamic_shapes=dynamic_shapes, strict=True
-                )
-                # .run_decompositions(decomp_table=get_decomp_table([]))
-                .module()
-            )
-        from executorch.backends.qualcomm.utils.utils import draw_graph
-        draw_graph(
-            "export_graph",
-            "/local/mnt/workspace/yuyazhua/MLGdev/demo/T5",
-            m,
-        )
+        m = torch.export.export(
+            module, inputs, dynamic_shapes=dynamic_shapes, strict=True
+        ).module()
+        print("export finished !")
+        # from executorch.backends.qualcomm.utils.utils import draw_graph
+        # draw_graph(
+        #     "export_graph",
+        #     "/local/mnt/workspace/yuyazhua/MLGdev/demo/T5",
+        #     m,
+        # )
         quantizer = make_quantizer(
             quant_dtype=quant_dtype,
             custom_annotations=custom_quant_annotations,

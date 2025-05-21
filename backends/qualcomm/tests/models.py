@@ -50,6 +50,18 @@ class Ga1LiftEdgeCase(torch.nn.Module):
         
         return relative_buckets
     
+class Ga1LiftEdgeCase2(torch.nn.Module):
+    
+    def __init__(self):
+        super().__init__()
+        self.inner_dim = 512
+
+    def forward(self, attn_output):
+        
+        attn_output = attn_output.transpose(1, 2).contiguous()
+        attn_output = attn_output.view(1, -1, self.inner_dim)
+        return attn_output
+
 class And(torch.nn.Module):
     def __init__(self, pos, neg):
         super().__init__()
