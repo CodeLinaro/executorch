@@ -27,6 +27,7 @@ from executorch.backends.qualcomm.utils.constants import (
     QCOM_ZERO_POINT,
 )
 from executorch.backends.qualcomm.utils.utils import (
+    get_decomp_table,
     get_soc_to_chipset_map,
     to_edge_transform_and_lower_to_qnn,
 )
@@ -515,10 +516,20 @@ class TestQNN(unittest.TestCase):
         block_size_map: Dict[str, Tuple] = None,
         submodule_qconfig_list: Optional[List[Tuple[Callable, ModuleQConfig]]] = None,
     ) -> torch.fx.GraphModule:
-        m = torch.export.export(
-            module, inputs, dynamic_shapes=dynamic_shapes, strict=True
-        ).module()
-
+        with torch.no_grad():
+            m = (
+                torch.export.export(
+                    module, inputs, dynamic_shapes=dynamic_shapes, strict=True
+                )
+                # .run_decompositions(decomp_table=get_decomp_table([]))
+                .module()
+            )
+        from executorch.backends.qualcomm.utils.utils import draw_graph
+        draw_graph(
+            "export_graph",
+            "/local/mnt/workspace/yuyazhua/MLGdev/demo/T5",
+            m,
+        )
         quantizer = make_quantizer(
             quant_dtype=quant_dtype,
             custom_annotations=custom_quant_annotations,
@@ -528,8 +539,11 @@ class TestQNN(unittest.TestCase):
         )
         if block_size_map is not None:
             quantizer.set_block_size_map(block_size_map)
+        print("prepare_pt2e start !")
         prepared = prepare_pt2e(m, quantizer)
+        print("calibrate start !")
         prepared(*inputs)
+        print("calibrate finished !")
         quantized_module = convert_pt2e(prepared)
         nodes = {node.target for node in quantized_module.graph.nodes}
         q_and_dq = {

@@ -54,6 +54,7 @@ target_link_libraries(
   extension_data_loader
   extension_flat_tensor
   extension_module
+  extension_flat_tensor
   extension_tensor
   gflags
   re2::re2

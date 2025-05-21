@@ -197,8 +197,10 @@ class QnnQuantizer(Quantizer):
         for node in gm.graph.nodes:
             if node.name in self.discard_nodes:
                 continue
-
+            
+            print(f"_get_quant_config: {node}")
             quant_config = self._get_quant_config(node)
+            print(f"Done_get_quant_config: {node}")
             if quant_config:
                 OP_ANNOTATOR[node.target](node, quant_config)
 

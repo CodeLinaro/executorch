@@ -58,6 +58,9 @@ class QnnOperatorSupport(OperatorSupportBase):
 
         self.qnn_manager.Init()
 
+        from executorch.backends.qualcomm.utils.utils import draw_graph
+        draw_graph("qnn_partitioner", "/local/mnt/workspace/yuyazhua/MLGdev/demo/T5", edge_program.graph_module)
+        
     def is_node_supported(self, _, node: torch.fx.Node) -> bool:
         if node.op != "call_function" or node.target in not_supported_operator:
             return False
@@ -104,6 +107,8 @@ class QnnOperatorSupport(OperatorSupportBase):
 
         self.nodes_to_wrappers.clear()
         print(f"[QNN Partitioner Op Support]: {node.target.__name__} | {supported}")
+        if not supported:
+            import pdb; pdb.set_trace()
         return supported
 
     def __del__(self):

@@ -9,6 +9,12 @@ import torch
 
 # module with related operator only
 
+# class Ga1LiftEdgeCase(torch.nn.Module):
+    
+#     def __init__(self):
+#         super().__init__()
+#         self.num_buckets=32
+#         self.max_distance=128
 
 # Ensure alias_copy is removed in remove_redundancy pass
 class Alias(torch.nn.Module):
@@ -21,6 +27,29 @@ class Alias(torch.nn.Module):
         return self.relu(alias_x)
 
 
+#     def forward(self, relative_position):
+        
+#         relative_buckets = 0
+#         self.num_buckets //= 2
+#         relative_buckets += (relative_position > 0).to(torch.long) * self.num_buckets
+        
+#         return relative_buckets
+    
+class Ga1LiftEdgeCase(torch.nn.Module):
+    
+    def __init__(self):
+        super().__init__()
+        self.num_buckets=32
+        self.max_distance=128
+
+    def forward(self, relative_position):
+        
+        relative_buckets = 0
+        self.num_buckets //= 2
+        relative_buckets += (relative_position > 0).to(torch.long) * self.num_buckets
+        
+        return relative_buckets
+    
 class And(torch.nn.Module):
     def __init__(self, pos, neg):
         super().__init__()

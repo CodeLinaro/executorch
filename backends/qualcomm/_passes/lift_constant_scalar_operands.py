@@ -39,9 +39,11 @@ SCALAR_OPS = {
     aten.lt.Scalar: TensorOpInfo(aten.lt.Tensor, False, False),
     aten.ne.Scalar: TensorOpInfo(aten.ne.Tensor, False, False),
     aten.add.Scalar: TensorOpInfo(aten.add.Tensor, False, False),
+    aten.add.Tensor: TensorOpInfo(aten.mul.Tensor, False, False),
     aten.add_.Scalar: TensorOpInfo(aten.add_.Tensor, False, False),
     aten.div.Scalar: TensorOpInfo(aten.div.Tensor, False, False),
     aten.mul.Scalar: TensorOpInfo(aten.mul.Tensor, False, False),
+    aten.mul.Tensor: TensorOpInfo(aten.mul.Tensor, False, False),
     aten.rsub.Scalar: TensorOpInfo(aten.rsub.Tensor, False, False),
     aten.sub.Scalar: TensorOpInfo(aten.sub.Tensor, False, False),
     aten.pow.Tensor_Scalar: TensorOpInfo(aten.pow.Tensor_Tensor, False, False),
@@ -55,6 +57,7 @@ SCALAR_OPS = {
 
 SKIP_LIFT_OPS = {
     aten.full_like.default,
+    aten.full.default,
     aten.arange.start_step,
     aten.arange.default,
     aten.scalar_tensor.default,
@@ -77,6 +80,8 @@ class LiftConstantScalarOperands(ExportPass):
     ) -> TensorConstant:
         # For dtype, in some cases, we cannot use node.args[0] as scalar dtype.
         # Ex: Where op args[0] can be bool, however, we probably want args[1] and args[2] to be dtype same as node.meta["val"] instead of bool type
+        if not is_float_tensor(node) and not SCALAR_OPS.get(node.target):
+            import pdb; pdb.set_trace()
         tensor = torch.tensor(
             [const_val],
             dtype=(

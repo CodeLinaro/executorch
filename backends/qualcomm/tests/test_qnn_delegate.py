@@ -1092,6 +1092,51 @@ class TestQNNQuantizedOperator(TestQNN):
             shared_buffer=TestQNN.shared_buffer,
         )
 
+    def test_my_ga_t5(self):
+        from transformers import T5Tokenizer, T5Model
+        # from transformers.models.t5.modeling_t5 import T5Attention
+        from executorch.examples.qualcomm.oss_scripts.t5 import _relative_position_bucket
+        # T5Attention._relative_position_bucket = staticmethod(_relative_position_bucket)
+        
+        tokenizer = T5Tokenizer.from_pretrained("t5-small")
+        module = T5Model.from_pretrained("t5-small").eval()
+
+        # module = _replace_position_bucket(module)
+        text = "Studies have been shown that owning a dog is good for you"
+        # input_ids = tokenizer(
+        #     "Studies have been shown that owning a dog is good for you", return_tensors="pt"
+        # ).input_ids.to(torch.int32)
+        decoder_input_ids = tokenizer("Studies show that", return_tensors="pt").input_ids.to(torch.int32)
+        # inputs = (input_ids, None, decoder_input_ids)
+        
+        encoded_inputs = tokenizer(text, return_tensors="pt")
+        inputs = (
+                encoded_inputs["input_ids"].to(torch.int32),
+                encoded_inputs["attention_mask"].to(torch.int32),
+                decoder_input_ids,
+        )
+        
+        
+        
+        sample_input = (inputs, )
+        # module(input_ids, None, decoder_input_ids)
+        module = self.get_qdq_module(module, sample_input[0], quant_dtype=QuantDtype.use_16a4w)
+        self.lower_module_and_test_output(module, sample_input[0])
+
+
+    def test_qnn_backend_ga1_lift_edgecase(self):
+        module = Ga1LiftEdgeCase()
+        sample_input = (torch.randn([15, 15], dtype=torch.float32),)
+        module = self.get_qdq_module(module, sample_input)
+        self.lower_module_and_test_output(module, sample_input)
+        
+    # TODO: repo for quant annotater bug    
+    def test_qnn_backend_ga1_lift_edgecase(self):
+        module = Ga1LiftEdgeCase()
+        sample_input = (torch.randn([15, 15], dtype=torch.float32),)
+        module = self.get_qdq_module(module, sample_input)
+        self.lower_module_and_test_output(module, sample_input)
+
     def test_qnn_backend_16a4w_conv2d(self):
         modules = [Conv2dSingle(), Conv2dSingle(bias=False)]  # noqa: F405
         sample_input = (torch.randn([1, 1, 3, 3]),)
