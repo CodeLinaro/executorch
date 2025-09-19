@@ -750,7 +750,7 @@ class CustomBuild(build):
 
         # Set PYTHONPATH to the location of the pip package.
         os.environ["PYTHONPATH"] = (
-            site.getsitepackages()[0] + ";" + os.environ.get("PYTHONPATH", "")
+            site.getsitepackages()[0] + ":" + os.environ.get("PYTHONPATH", "")
         )
         # Build the system.
         self.spawn(["cmake", "--build", cmake_cache_dir, *cmake_build_args])
