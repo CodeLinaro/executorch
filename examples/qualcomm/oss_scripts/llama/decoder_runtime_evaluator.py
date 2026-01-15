@@ -18,6 +18,7 @@ import torch
 from executorch.examples.models.llama.evaluate.eager_eval import EagerEvalWrapper
 from executorch.examples.qualcomm.oss_scripts.llama.decoder_constants import (
     ATTENTION_SINK_EVICTOR,
+    AUDIO_ENCODER,
     DECODER_MODEL_VERSION,
     EVAL_MODE,
     MODALITY_INPUT_FLAG_MAP,
@@ -136,11 +137,19 @@ class EvalBase(ABC):
                 ]
             )
             if self.is_multimodal:
+                encoder_path = self.pte_paths[
+                    next(
+                        filter(
+                            lambda m: m in self.pte_paths,
+                            [AUDIO_ENCODER, VISION_ENCODER],
+                        )
+                    )
+                ]
                 base_cmd = " ".join(
                     [
                         base_cmd,
                         f"--decoder_path {self.pte_paths[TEXT_DECODER]}",
-                        f"--encoder_path {self.pte_paths[VISION_ENCODER]}",
+                        f"--encoder_path {encoder_path}",
                         f"--tok_embedding_path {self.pte_paths[TOK_EMBEDDING]}",
                     ]
                 )
@@ -170,11 +179,19 @@ class EvalBase(ABC):
             )
 
             if self.is_multimodal:
+                encoder_path = self.pte_paths[
+                    next(
+                        filter(
+                            lambda m: m in self.pte_paths,
+                            [AUDIO_ENCODER, VISION_ENCODER],
+                        )
+                    )
+                ]
                 base_cmd = " ".join(
                     [
                         base_cmd,
                         f"--decoder_path {os.path.basename(self.pte_paths[TEXT_DECODER])}",
-                        f"--encoder_path {os.path.basename(self.pte_paths[VISION_ENCODER])}",
+                        f"--encoder_path {os.path.basename(encoder_path)}",
                         f"--tok_embedding_path {os.path.basename(self.pte_paths[TOK_EMBEDDING])}",
                     ]
                 )
@@ -237,12 +254,8 @@ class DefaultEval(EvalBase):
 
         modality_input_cmd = []
         self.modality_input_files = []
-        for modality, data in modality_inputs.items():
-            if (
-                not modality_inputs[modality]
-                or modality not in MODALITY_INPUT_FLAG_MAP
-                or modality is TEXT_DECODER
-            ):
+        for modality, inputs in modality_inputs.items():
+            if not all([inputs[0], modality in MODALITY_INPUT_FLAG_MAP]):
                 continue
 
             # Specify the input list filename by it's modality.
@@ -252,11 +265,13 @@ class DefaultEval(EvalBase):
             input_list_file, input_files = generate_inputs(
                 self.args.artifact,
                 input_list_filename=input_list_filename,
-                inputs=data,
+                inputs=inputs,
                 prefix_input_filename=modality,
             )
             self.modality_input_files.append(input_list_file)
             self.modality_input_files.extend(input_files)
+            if args.enable_x86_64:
+                input_list_filename = f"{self.args.artifact}/{input_list_filename}"
             modality_input_cmd.append(
                 f"--{MODALITY_INPUT_FLAG_MAP[modality]} {input_list_filename}"
             )
@@ -284,6 +299,13 @@ class DefaultEval(EvalBase):
                 f"--seq_len {args.max_seq_len}",
             ]
         )
+        if self.is_multimodal:
+            self.runner_cmd = " ".join(
+                [
+                    self.runner_cmd,
+                    self.modality_input_cmd,
+                ]
+            )
 
     def run(self, prompt):
         multi_prompts = " ".join([f'--prompt "{p}"' for p in prompt])
@@ -293,7 +315,7 @@ class DefaultEval(EvalBase):
 
         if self.args.enable_x86_64:
             # x86 emulator is intended for CI and not performance. Check only the first few tokens.
-            seq_len = min(self.args.max_seq_len, 32)
+            seq_len = min(self.args.max_seq_len, 320 if self.is_multimodal else 32)
             runner_cmd = " ".join(
                 [
                     self.runner_cmd,
@@ -323,7 +345,6 @@ class DefaultEval(EvalBase):
             extra_files = [self.runtime_tokenizer_path]
             if self.is_multimodal:
                 extra_files.extend(self.modality_input_files)
-                runner_cmd = " ".join([runner_cmd, self.modality_input_cmd])
             self.adb.push(inputs=[], files=extra_files)
             self.adb.execute(custom_runner_cmd=runner_cmd)
             self.adb.pull(
