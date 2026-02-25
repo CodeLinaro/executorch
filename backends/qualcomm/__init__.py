@@ -1,5 +1,7 @@
 import os
 
+import torch
+
 from .scripts.download_qnn_sdk import install_qnn_sdk, is_linux_x86
 
 
@@ -11,3 +13,4 @@ if env_flag not in ("1", "true", "yes") and not qnn_sdk_root_flag and is_linux_x
     ok = install_qnn_sdk()
     if not ok:
         raise RuntimeError("Failed to install QNN SDK. Please check the logs above.")
+torch.backends.mkldnn.enabled = False
