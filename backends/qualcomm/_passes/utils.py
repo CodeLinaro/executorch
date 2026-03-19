@@ -79,6 +79,7 @@ def get_passes_dependency_for_capture_program():
         FixedLinearKeepDim,
         FoldQDQ,
         I64toI32,
+        InsertCastForFpActQuantizedWeight,
         LayoutTransform,
         RecomposePadMaxPool2d,
         RecomposePixelUnshuffle,
@@ -112,6 +113,7 @@ def get_passes_dependency_for_capture_program():
         FixedLinearKeepDim: [FoldQDQ],
         FoldQDQ: [AnnotateQuantAttrs, AnnotateStack, AnnotateUnbind],
         I64toI32: [RemoveRedundancy],
+        InsertCastForFpActQuantizedWeight: [FoldQDQ, LayoutTransform],
         LayoutTransform: [
             AnnotateQuantAttrs,
             ExpandBroadcastTensorShape,
