@@ -71,10 +71,9 @@ def main(args):
 
     pte_filename = "fastvit_qnn"
 
-    def get_custom_quantizer(backend, soc_model):
+    def get_custom_quantizer():
         quantizer = make_quantizer(
             quant_dtype=QuantDtype.use_8a8w,
-            soc_model=soc_model,
             backend=qnn_config.backend,
             soc_model=qnn_config.soc_model,
         )

@@ -8476,8 +8476,6 @@ class TestUtilsScript(TestQNN):
                 f"{tmp_dir}/input_list",
                 "--soc_model",
                 self.soc_model,
-                "--host",
-                self.host,
                 "--target",
                 self.target,
                 "--device",
