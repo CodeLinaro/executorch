@@ -74,7 +74,6 @@ def main(args):
     def get_custom_quantizer(backend, soc_model):
         quantizer = make_quantizer(
             quant_dtype=QuantDtype.use_8a8w,
-            backend=backend,
             soc_model=soc_model,
             backend=qnn_config.backend,
             soc_model=qnn_config.soc_model,
