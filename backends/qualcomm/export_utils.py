@@ -487,7 +487,7 @@ def build_executorch_binary(
     backend_options = {
         QnnExecuTorchBackendType.kGpuBackend: generate_gpu_compiler_spec(),
         QnnExecuTorchBackendType.kHtpBackend: generate_htp_compiler_spec(
-            use_fp16=False if any([quant_dtype, custom_quantizer]) is not None else True
+            use_fp16=not any([quant_dtype, custom_quantizer])
         ),
     }[qnn_config.backend]
     compile_spec = generate_qnn_executorch_compiler_spec(

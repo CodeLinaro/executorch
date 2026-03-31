@@ -401,7 +401,6 @@ def export_mimi_decoder(
                 args,
                 qnn_config,
                 encoded_results,
-                encoded_results_list,
                 pcm_chunk_size,
                 static_decoder_pte_filename,
             )
