@@ -51,7 +51,7 @@ def main(args):
     compiler_specs = generate_qnn_executorch_compiler_spec(
         soc_model=QcomChipset.SM8750,
         backend_options=backend_options,
-        profile=True,
+        profile_level=2,
     )
     # lower to QNN ExecuTorch Backend
     edge_prog_mgr = to_edge_transform_and_lower_to_qnn(
