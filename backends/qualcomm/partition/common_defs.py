@@ -16,6 +16,7 @@ not_supported_operator = [
     exir_ops.edge.dim_order_ops._clone_dim_order.default,
     # QNN does not support 4-bit embedding
     exir_ops.edge.quantized_decomposed.embedding_4bit.dtype,
+    exir_ops.edge.dim_order_ops._empty_dim_order.default,
 ]
 
 to_be_implemented_operator = [

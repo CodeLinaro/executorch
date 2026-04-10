@@ -133,7 +133,7 @@ class QnnCausalLMExportableModule(torch.nn.Module):
         logging.info(f"Metadata to be recorded in PTE: {self._metadata}")
         self.exportable_module = TorchExportableModuleForDecoderOnlyLM(
             self.model,
-            max_batch_size=1,
+            batch_size=1,
             max_cache_len=self._metadata.get("get_max_seq_len"),
         )
         self._register_attention_mask_for_4_53(self.exportable_module)
@@ -154,7 +154,7 @@ class QnnCausalLMExportableModule(torch.nn.Module):
         return (example_input_ids, example_cache_position)
 
     def forward(self, input_ids: torch.Tensor, cache_position: torch.Tensor):
-        return self.exportable_module(input_ids, cache_position)
+        return self.exportable_module(input_ids=input_ids, cache_position=cache_position)
 
     def get_metadata(self):
         return self._metadata
