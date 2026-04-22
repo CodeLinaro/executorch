@@ -71,17 +71,6 @@ python mobilenet_v2.py -s <device_serial> -m "SM8550" -b path/to/build-android/ 
 python deeplab_v3.py -s <device_serial> -m "SM8550" -b path/to/build-android/ --download
 ```
 
-#### Check context binary version
-This is typically useful when users want to run any models under `qaihub_scripts`. When users retrieve context binaries from Qualcomm AI Hub, we need to ensure the QNN SDK used to run the `qaihub_scripts` is the same version as the QNN SDK that Qualcomm AI Hub used to compile the context binaries. To do so, please run the following script to retrieve the JSON file that contains the metadata about the context binary:
-```bash
-cd ${QNN_SDK_ROOT}/bin/x86_64-linux-clang
-./qnn-context-binary-utility --context_binary ${PATH_TO_CONTEXT_BINARY} --json_file ${OUTPUT_JSON_NAME}
-```
-After retrieving the json file, search in the json file for the field "buildId" and ensure it matches the `${QNN_SDK_ROOT}` you are using for the environment variable.
-If you run into the following error, that means the ${QNN_SDK_ROOT} that you are using is older than the context binary's QNN SDK version. In this case, please download a newer QNN SDK version.
-```
-Error: Failed to get context binary info.
-```
 ## Model Structure
 This section outlines the essential APIs and utilities provided to streamline the process of model conversion, deployment, and evaluation on Qualcomm hardware using ExecuTorch. The official APIs can be found under [export_utils.py](../../backends/qualcomm/export_utils.py)
 
