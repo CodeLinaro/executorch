@@ -47,12 +47,6 @@ def main(args):
     # ensure the working directory exist.
     os.makedirs(args.artifact, exist_ok=True)
 
-    if not args.compile_only and args.device is None:
-        raise RuntimeError(
-            "device serial is required if not compile only. "
-            "Please specify a device serial by -s/--device argument."
-        )
-
     data_num = 100
 
     inputs, targets = get_imagenet_dataset(
@@ -80,9 +74,6 @@ def main(args):
     data_num = 1
     inputs = [inputs[0]]
     targets = [targets[0]]
-
-    if args.compile_only:
-        return
 
     # Please ensure that dump_intermediate_outputs are set to true when creating SimpleADB
     adb = SimpleADB(
