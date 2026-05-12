@@ -211,27 +211,35 @@ Using the ExecuTorch Developer Tools for Numerical Debugging
 #
 # The returned DataFrame contains columns for each operator including:
 #
-# - ``aot_debug_handle``: The debug handle tuple identifying the AOT operator(s)
+# - ``aot_debug_handle``: The debug handle tuple identifying the AOT operator(s).
+#   For ops grouped into a single delegated subgraph chunk, this is the tuple of
+#   every internal handle the chunk implements.
 # - ``aot_ops``: The operators in the eager model graph
 # - ``aot_intermediate_output``: Intermediate outputs from eager model
-# - ``runtime_ops``: The kernel-level operators executed at runtime
+# - ``runtime_ops``: The kernel-level operators executed at runtime. ``DELEGATE_CALL``
+#   appears as a single entry for each delegated subgraph chunk.
 # - ``runtime_debug_handle``: The debug handle tuple from the runtime
 # - ``runtime_intermediate_output``: Intermediate outputs from runtime
-# - ``gap``: The numerical gap (MSE) between eager and runtime outputs; ``nan`` when shapes differ
+# - ``gap``: The numerical gap (MSE) between eager and runtime outputs
 # - ``stacktraces``: A dictionary mapping each operator name to its source code stack trace
 #
 # Example output:
 #
 # .. code-block:: text
 #
-#    |    | aot_debug_handle | aot_ops                                    | aot_intermediate_output                           | runtime_ops                          | runtime_debug_handle | runtime_intermediate_output                    | gap                      | stacktraces                                    |
-#    |----|-----------------|-------------------------------------------|---------------------------------------------------|--------------------------------------|---------------------|------------------------------------------------|--------------------------|------------------------------------------------|
-#    | 0  | (4,)            | [conv2d]                                  | [[[tensor([-0.0130,  0.0075, -0.0334,...          | [native_call_convolution_out]        | (4,)                | [[[tensor([-0.0130,  0.0075, -0.0334,...       | [3.2530690555343034e-15] | {'conv2d': 'File "vit.py", line 10...'}        |
-#    | 1  | (11,)           | [permute, cat, add, dropout]              | [[[tensor(-0.0024), tensor(0.0054),...            | [native_call_permute_copy_out]       | (11,)               | [[[tensor(-0.0024), tensor(0.0054),...         | [3.2488685838924244e-15] | {'permute': 'File "vit.py", line 15...', ...}  |
-#    | ...|                 |                                           |                                                   |                                      |                     |                                                |                          |                                                |
-#    | 4  | (62,)           | [linear, unflatten, unsqueeze, transp...] | [[[tensor(0.0045), tensor(-0.0084),...            | [native_call_expand_copy.out]        | (62,)               | [[[tensor([0.5541, 0.0014, 0.0015,...          | [nan]                    | {'linear': 'File "vit.py", line 125...', ...}  |
-#    | ...|                 |                                           |                                                   |                                      |                     |                                                |                          |                                                |
-#    | 37 | (164,)          | [layer_norm_24]                           | [[[tensor(-0.9172), tensor(0.0853),...            | [native_call_native_layer_norm.out]  | (164,)              | [[[tensor(-0.9172), tensor(0.0853),...         | [2.2175176622973748e-11] | {'layer_norm_24': 'File "vit.py"...'}          |
+#    |    | aot_debug_handle               | aot_ops                                       | aot_intermediate_output                  | runtime_ops                                       | runtime_debug_handle           | runtime_intermediate_output              | gap                      | stacktraces                                  |
+#    |----|--------------------------------|-----------------------------------------------|------------------------------------------|---------------------------------------------------|--------------------------------|------------------------------------------|--------------------------|----------------------------------------------|
+#    | 0  | (1, 2, 3, 5, 6, 7)             | [conv2d, reshape, permute, cat, add, dropout] | [[[tensor(-0.0024), tensor(0.0054),...   | [DELEGATE_CALL]                                   | (1, 2, 3, 5, 6, 7)             | [[[tensor(-0.0024), tensor(0.0054),...   | [0.0]                    | {'conv2d': 'File "vit.py", line 10...'}      |
+#    | 1  | (4,)                           | [expand]                                      | [[[tensor(-0.0012), tensor(0.0027),...   | [native_call_expand_copy.out]                     | (4,)                           | [[[tensor(-0.0012), tensor(0.0027),...   | [0.0]                    | {'expand': 'File "vit.py", line 50...'}      |
+#    | 2  | (8,)                           | [layer_norm]                                  | [[[tensor(-0.0001), tensor(0.0009),...   | [native_call_native_layer_norm.out]               | (8,)                           | [[[tensor(-0.0001), tensor(0.0009),...   | [1.5257813119012582e-16] | {'layer_norm': 'File "vit.py", line 80...'}  |
+#    | 3  | (9, 10, 11, 12, 13)            | [transpose, linear, unflatten, unsqueeze,...] | [[[tensor(0.0132), tensor(-0.0005),...   | [DELEGATE_CALL, native_call_expand_copy.out, ...] | (9, 10, 11, 12, 13)            | [[[tensor(0.0132), tensor(-0.0005),...   | [6.72759426534678e-16]   | {'transpose': 'File "vit.py", line 90...'}   |
+#    | ...|                                |                                               |                                          |                                                   |                                |                                          |                          |                                              |
+#    | 52 | (166,)                         | [linear_48]                                   | [[tensor(-0.8981), tensor(0.6046),...    | [DELEGATE_CALL]                                   | (166,)                         | [[tensor(-0.8981), tensor(0.6046),...    | [8.760367306096254e-12]  | {'linear_48': 'File "vit.py", line 120...'}  |
+#
+# Each row is one runtime intermediate-output cluster: either a single
+# non-delegated op or one delegated subgraph chunk grouped under a
+# ``DELEGATE_CALL``. Multi-handle chunks list every internal AOT op together
+# so you can map the delegate boundary back to the eager graph.
 #
 # The ``stacktraces`` column is particularly useful for tracing operators back to the
 # original PyTorch source code. Each entry is a dictionary where keys are operator names
@@ -279,33 +287,24 @@ Using the ExecuTorch Developer Tools for Numerical Debugging
 # .. code-block:: text
 #
 #    Top 5 operators with largest numerical discrepancies:
-#       aot_debug_handle          aot_ops                            aot_intermediate_output            runtime_ops                   runtime_debug_handle  runtime_intermediate_output                       gap                                stacktraces
-#    37          (164,)  [layer_norm_24]  [[[tensor(-0.9172), tensor(0.0853),...  [native_call_native_layer_norm.out]              (164,)  [[[tensor(-0.9172), tensor(0.0853),...  [2.2175176622973748e-11]  {'layer_norm_24': 'File "vit.py"...'}
-#    33          (144,)  [layer_norm_21]  [[[tensor(-0.8958), tensor(-0.0307),...  [native_call_native_layer_norm.out]             (144,)  [[[tensor(-0.8958), tensor(-0.0307),...  [1.2286585568717539e-11]  {'layer_norm_21': 'File "vit.py"...'}
-#    36          (157,)  [layer_norm_23]  [[[tensor(-0.8750), tensor(-0.0243),...  [native_call_native_layer_norm.out]             (157,)  [[[tensor(-0.8750), tensor(-0.0243),...  [1.2271681610366983e-11]  {'layer_norm_23': 'File "vit.py"...'}
-#    30          (131,)  [layer_norm_19]  [[[tensor(-0.4218), tensor(-0.3333),...  [native_call_native_layer_norm.out]             (131,)  [[[tensor(-0.4218), tensor(-0.3333),...  [1.1904724456170941e-11]  {'layer_norm_19': 'File "vit.py"...'}
-#    24          (105,)  [layer_norm_15]  [[[tensor(-0.2805), tensor(-0.3079),...  [native_call_native_layer_norm.out]             (105,)  [[[tensor(-0.2805), tensor(-0.3079),...  [1.1866889275499194e-11]  {'layer_norm_15': 'File "vit.py"...'}
-#
-#    --- Operator 37 ---
-#    Operators: ['layer_norm_24']
-#    Gap: [2.2175176622973748e-11]
-#    Stack traces:
-#      layer_norm_24:
-#        File "torchvision/models/vision_transformer.py", line 78, in forward
-#          x = self.ln(x)
-#        File "torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+#                       aot_debug_handle                                            aot_ops                            aot_intermediate_output                                        runtime_ops            runtime_debug_handle                        runtime_intermediate_output                       gap                                        stacktraces
+#    49  (158, 159, 160, 161, 162, 163)  [linear_46, gelu_11, dropout_35, linear_47, dr...  [[[tensor(-0.6154), tensor(-0.0025), tensor(-0...                                    [DELEGATE_CALL]  (158, 159, 160, 161, 162, 163)  [[[tensor(-0.6154), tensor(-0.0025), tensor(-0...  [3.7287804660557997e-11]  {'linear_46': 'File "vit.py", line 100...'}
+#    45  (145, 146, 147, 148, 149, 150)  [linear_42, gelu_10, dropout_32, linear_43, dr...  [[[tensor(-0.2785), tensor(-0.2209), tensor(-0...                                    [DELEGATE_CALL]  (145, 146, 147, 148, 149, 150)  [[[tensor(-0.2785), tensor(-0.2208), tensor(-0...  [3.267051816109279e-11]  {'linear_42': 'File "vit.py", line 100...'}
+#    47       (152, 153, 154, 155, 156)  [transpose_66, linear_44, unflatten_11, unsque...  [[[tensor(-0.5681), tensor(-0.0251), tensor(-0...  [DELEGATE_CALL, native_call_expand_copy.out, D...       (152, 153, 154, 155, 156)  [[[tensor(-0.5681), tensor(-0.0251), tensor(-0...  [3.043042878567803e-11]  {'transpose_66': 'File "vit.py", line 90...'}
+#    50                          (164,)                                    [layer_norm_24]  [[[tensor(-0.8486), tensor(-0.0315), tensor(-0...                [native_call_native_layer_norm.out]                          (164,)  [[[tensor(-0.8486), tensor(-0.0315), tensor(-0...  [2.3309619445739474e-11]  {'layer_norm_24': 'File "vit.py", line 78...'}
+#    41  (132, 133, 134, 135, 136, 137)  [linear_38, gelu_9, dropout_29, linear_39, dro...  [[[tensor(-0.3233), tensor(-0.1968), tensor(-0...                                    [DELEGATE_CALL]  (132, 133, 134, 135, 136, 137)  [[[tensor(-0.3233), tensor(-0.1968), tensor(-0...  [1.8573805941767968e-11]  {'linear_38': 'File "vit.py", line 100...'}
 #
 #    Operators with MSE > 0.0001:
 #    Empty DataFrame
 #    Columns: [aot_debug_handle, aot_ops, aot_intermediate_output, runtime_ops, runtime_debug_handle, runtime_intermediate_output, gap, stacktraces]
 #    Index: []
 #
-# In this example, the largest numerical gaps come from layer norm operators (gaps ~1e-11),
-# which reflects floating-point rounding at float32 precision — well within acceptable tolerance.
-# Some attention-related operators (e.g. ``linear, unflatten, unsqueeze, transpose`` groups) show
-# ``nan`` gap: this occurs when the AOT op-group output shape does not match the shape of the
-# individual runtime kernel output that was captured for the same debug handle. No operators
-# exceed the 1e-4 threshold, confirming that XNNPACK float32 delegation is numerically accurate.
+# The largest numerical gaps come from MLP blocks (``linear, gelu, dropout`` groups
+# inside a ``DELEGATE_CALL``) and attention QKV blocks, both at the order of
+# ``~3e-11`` — floating-point rounding accumulated across the chunk at float32
+# precision. ``layer_norm`` rows are non-delegated CPU kernels and show similar
+# magnitudes. No operators exceed the ``1e-4`` threshold, confirming that
+# XNNPACK float32 delegation is numerically accurate.
 
 ######################################################################
 # Pipeline 2: CMake Runtime

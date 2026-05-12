@@ -22,6 +22,7 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
+    Set,
     Tuple,
     TypeAlias,
     TypedDict,
@@ -1339,6 +1340,29 @@ class Inspector:
         Retrieve the runtime intermediate outputs(debug handles and intermediate values mappings)
         from the event blocks, along with the corresponding debug handles and op names mapping.
         """
+        # Collect debug handles already covered by fine-grained inner delegated
+        # events (i.e. delegated events with op_types and debug_data populated),
+        # grouped per backend. When such per-op intermediate outputs exist for a
+        # delegated subgraph, the wrapping DELEGATE_CALL event is redundant: its
+        # debug_handles span every internal handle.
+        inner_delegated_handles_by_backend: Dict[Optional[str], Set[int]] = defaultdict(
+            set
+        )
+        for event_block in self.event_blocks:
+            for event in event_block.events:
+                if (
+                    event.is_delegated_op
+                    and event.op_types
+                    and event.debug_data
+                    and event.debug_handles is not None
+                ):
+                    handles = event.debug_handles
+                    if isinstance(handles, int):
+                        handles = (handles,)
+                    inner_delegated_handles_by_backend[
+                        event.delegate_backend_name
+                    ].update(handles)
+
         debug_handle_to_output = {}
         debug_handle_to_op_names = {}
         for event_block in self.event_blocks:
@@ -1355,6 +1379,17 @@ class Inspector:
                     debug_handle = (debug_handle,)
                 else:
                     debug_handle = tuple(debug_handle)
+                # Skip a DELEGATE_CALL whose handles are already covered by
+                # fine-grained inner delegated events from the same backend
+                # (see comment above).
+                if event.name == "DELEGATE_CALL":
+                    backend_inner = inner_delegated_handles_by_backend.get(
+                        event.delegate_backend_name
+                    )
+                    if backend_inner and not set(debug_handle).isdisjoint(
+                        backend_inner
+                    ):
+                        continue
                 current_entry = debug_handle_to_output.get(
                     debug_handle, (-1, None, event.num_outputs)
                 )

@@ -9480,9 +9480,7 @@ class TestUtilsScript(TestQNN):
             else:
                 svg_path = msg["svg_path"]
                 csv_path = msg["csv_path"]
-                min_accepted = 231
-                max_accepted = 237
-                # Having a +- 3 tolerance, expecting 234 events
+                expected_accepted_events = 234
                 assert os.path.exists(svg_path), f"Unable to find SVG file: {svg_path}"
                 assert os.path.exists(csv_path), f"Unable to find CSV file: {csv_path}"
 
@@ -9494,19 +9492,23 @@ class TestUtilsScript(TestQNN):
                     for row in reader:
                         if len(row) > index and row[index].strip().upper() == "TRUE":
                             csv_valid_count += 1
-                # We assume csv_valid_count == compared_events, since all compared events meet metric's threshold
-                assert (
-                    min_accepted <= csv_valid_count <= max_accepted
-                ), f"Expected CSV events with valid score is outside of expected range, number of valid score events found: {csv_valid_count}"
+                # We assume csv_valid_count == expected_accepted_events, since all compared events meet metric's threshold
+                self.assertEqual(
+                    expected_accepted_events,
+                    csv_valid_count,
+                    msg=f"Expected CSV events: {expected_accepted_events}, found: {csv_valid_count}.",
+                )
 
                 svg_valid_count = 0
                 with open(svg_path, "r", encoding="utf-8") as svg_file:
                     for line in svg_file:
                         svg_valid_count += line.count("is_valid_score=True")
-                # We assume svg_valid_count == compared_events, since all compared events meet metric's threshold
-                assert (
-                    min_accepted <= svg_valid_count <= max_accepted
-                ), f"Expected SVG events with valid score is outside of expected range, number of valid score events found: {svg_valid_count}"
+                # We assume svg_valid_count == expected_accepted_events, since all compared events meet metric's threshold
+                self.assertEqual(
+                    expected_accepted_events,
+                    svg_valid_count,
+                    msg=f"Expected SVG events: {expected_accepted_events}, found: {svg_valid_count}.",
+                )
                 print(
                     f"CSV valid count: {csv_valid_count}. SVG valid count: {svg_valid_count}"
                 )
