@@ -197,9 +197,6 @@ Using the ExecuTorch Developer Tools for Numerical Debugging
 #        etdump_path=etdump_path,
 #        etrecord=etrecord_path,
 #        debug_buffer_path=debug_buffer_path,
-#        # reference_graph_name defaults to EDGE_DIALECT_GRAPH_KEY; override when
-#        # you want to use a different graph (e.g. a post-lowering graph key) as
-#        # the reference for debug handle mapping.
 #    )
 #
 #    pd.set_option("display.width", 100000)

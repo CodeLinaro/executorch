@@ -184,7 +184,8 @@ class QnnBackend(BackendDetails):
                 )
                 if qnn_manager.IsTensorDump():
                     for node in programs[i].graph.nodes:
-                        # Make sure debug handle and runtime tensor name exists. Since we cannot support multioutput, only save single output nodes, which len of node.meta[QCOM_TENSOR_NAME] == 1
+                        # Skip multi-output nodes: devtools only supports
+                        # single-output intermediate capture (len == 1).
                         if (
                             (handle_id := node.meta.get(DEBUG_HANDLE_KEY))
                             and QCOM_TENSOR_NAME in node.meta
