@@ -228,6 +228,71 @@ Error QnnManager::RegisterCustomMem(
   return Error::Ok;
 }
 
+Error QnnManager::GetContextBinarySize(uint64_t& size) {
+  Qnn_ContextBinarySize_t binary_size = 0;
+  auto error = backend_bundle_ptr_->implementation->GetQnnInterface()
+                   .qnn_context_get_binary_size(
+                       backend_params_ptr_->qnn_context_ptr_->GetHandle(), &binary_size);
+  if (error != QNN_SUCCESS) {
+    return Error::Internal;
+  }
+  size = binary_size;
+  return Error::Ok;
+}
+
+Error QnnManager::CreateDlc(void*& dlc_handle) {
+  QnnSystemDlc_Handle_t handle = nullptr;
+  auto error = backend_bundle_ptr_->system_implementation
+                   ->GetQnnSystemInterface()
+                   .qnn_system_dlc_create_with_destination_dir(
+                       backend_bundle_ptr_->qnn_logger_ptr->GetHandle(), nullptr, &handle);
+  if (error != QNN_SUCCESS) {
+    return Error::Internal;
+  }
+  dlc_handle = handle;
+  return Error::Ok;
+}
+
+Error QnnManager::AddContextToDlc(void* dlc_handle) {
+  auto error = backend_bundle_ptr_->implementation->GetQnnInterface()
+                   .qnn_context_add_to_dlc(
+                       backend_params_ptr_->qnn_context_ptr_->GetHandle(), dlc_handle);
+  return error == QNN_SUCCESS ? Error::Ok : Error::Internal;
+}
+
+Error QnnManager::GetDlcBinary(void* dlc_handle, std::vector<uint8_t>& binary) {
+  Qnn_SystemDlcBinarySize_t size = 0;
+  auto& system = backend_bundle_ptr_->system_implementation->GetQnnSystemInterface();
+  if (system.qnn_system_dlc_get_binary_size(dlc_handle, &size) != QNN_SUCCESS) {
+    return Error::Internal;
+  }
+  binary.resize(size);
+  Qnn_SystemDlcBinarySize_t written = 0;
+  if (system.qnn_system_dlc_get_binary(dlc_handle, binary.data(), size, &written) != QNN_SUCCESS ||
+      written > size) {
+    return Error::Internal;
+  }
+  binary.resize(written);
+  return Error::Ok;
+}
+
+Error QnnManager::GetDlcRecordCount(
+    void* dlc_handle,
+    QnnSystemDlc_RecordType_t record_type,
+    uint32_t& count) {
+  QnnSystemDlc_RecordHandle_t* records = nullptr;
+  auto error = backend_bundle_ptr_->system_implementation
+                   ->GetQnnSystemInterface()
+                   .qnn_system_dlc_get_records_by_type(
+                       dlc_handle, record_type, 0, &records, &count);
+  return error == QNN_SUCCESS ? Error::Ok : Error::Internal;
+}
+
+void QnnManager::FreeDlc(void* dlc_handle) {
+  backend_bundle_ptr_->system_implementation->GetQnnSystemInterface()
+      .qnn_system_dlc_free(dlc_handle);
+}
+
 Error QnnManager::InitBackend() {
   // Get or create the shared backend bundle
   Error err = QnnBackendUnifiedRegistry::GetInstance().GetOrCreateBackendBundle(

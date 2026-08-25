@@ -18,6 +18,7 @@
 #include <executorch/runtime/core/error.h>
 
 #include <memory>
+#include <vector>
 #include <unordered_map>
 
 namespace executorch {
@@ -80,11 +81,22 @@ class QnnManager {
 
   executorch::runtime::Error GetContextBinary(
       QnnExecuTorchContextBinary& qnn_executorch_context_binary);
+  executorch::runtime::Error GetContextBinarySize(uint64_t& size);
 
   executorch::runtime::Error CompileDlc();
   executorch::runtime::Error Compile(
       const std::string& graph_name,
       std::vector<std::shared_ptr<OpWrapper>>& op_wrappers);
+  executorch::runtime::Error CreateDlc(void*& dlc_handle);
+  executorch::runtime::Error AddContextToDlc(void* dlc_handle);
+  executorch::runtime::Error GetDlcBinary(
+      void* dlc_handle,
+      std::vector<uint8_t>& binary);
+  executorch::runtime::Error GetDlcRecordCount(
+      void* dlc_handle,
+      QnnSystemDlc_RecordType_t record_type,
+      uint32_t& count);
+  void FreeDlc(void* dlc_handle);
 
   executorch::runtime::Error RegisterMem(
       void* data_ptr,

@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import logging
 import threading
 from typing import Dict, List
@@ -11,6 +12,7 @@ from executorch.backends.qualcomm.serialization.qc_schema import (
 )
 from executorch.backends.qualcomm.serialization.qc_schema_serialize import (
     flatbuffer_to_option,
+    option_to_flatbuffer,
 )
 from executorch.exir.backend.compile_spec_schema import CompileSpec
 
@@ -20,13 +22,13 @@ _current_qnn_managers = threading.local()
 
 class QnnManagerRegistry:
     def __init__(self):
-        # Registry stores {backend_type: QnnManager instance}
         self._registry = {}
 
     def get_or_create_qnn_manager(
-        self, backend_type: QnnExecuTorchBackendType, option: bytes
+        self, backend_type: QnnExecuTorchBackendType, option: bytes, soc_model=None
     ) -> PyQnnManager.QnnManager:
-        if backend_type not in self._registry:
+        key = (backend_type, soc_model)
+        if key not in self._registry:
             qnn_manager = PyQnnManager.QnnManager(option)
             err = qnn_manager.InitBackend()
             if err.value != 0:
@@ -35,17 +37,13 @@ class QnnManagerRegistry:
                     "Ensure QNN SDK libraries are available "
                     "(e.g. LD_LIBRARY_PATH includes $QNN_SDK_ROOT/lib/x86_64-linux-clang/)."
                 )
-            self._registry[backend_type] = qnn_manager
-        return self._registry[backend_type]
+            self._registry[key] = qnn_manager
+        return self._registry[key]
 
-    def destroy_qnn_manager(self, backend_type: QnnExecuTorchBackendType):
-        if backend_type in self._registry:
-            self._registry[backend_type].Destroy()
-            del self._registry[backend_type]
-        else:
-            logging.warning(
-                f"Attempted to destroy non-existent QnnManager for backend type {backend_type.name}"
-            )
+    def destroy_all(self):
+        for qnn_manager in self._registry.values():
+            qnn_manager.Destroy()
+        self._registry.clear()
 
 
 @contextlib.contextmanager
@@ -54,41 +52,49 @@ def QnnManagerContext(compile_specs: Dict[str, List[CompileSpec]]):
     current_context_registry = QnnManagerRegistry()
     _current_qnn_managers.active_registry = current_context_registry
 
-    backend_types_in_this_context = set()
-
     try:
         for compile_spec_list in compile_specs.values():
             option = generate_qnn_executorch_option(compile_spec_list)
             python_options = flatbuffer_to_option(option)
             backend_type = python_options.backend_options.backend_type
-
-            # Use the current_context_registry to get/create the manager
-            current_context_registry.get_or_create_qnn_manager(backend_type, option)
-            backend_types_in_this_context.add(backend_type)
+            fcb_options = python_options.fcb_options
+            if fcb_options is None:
+                current_context_registry.get_or_create_qnn_manager(backend_type, option)
+            else:
+                for soc_info in fcb_options.soc_infos:
+                    per_soc_options = copy.deepcopy(python_options)
+                    per_soc_options.soc_info = soc_info
+                    current_context_registry.get_or_create_qnn_manager(
+                        backend_type,
+                        option_to_flatbuffer(per_soc_options),
+                        soc_info.soc_model,
+                    )
         yield
     finally:
-        # Destroy only the managers created within this context
-        for backend_type in backend_types_in_this_context:
-            current_context_registry.destroy_qnn_manager(backend_type)
+        current_context_registry.destroy_all()
 
         # Clear the active registry reference
         _current_qnn_managers.active_registry = None
 
 
+def get_current_qnn_managers(
+    backend_type: QnnExecuTorchBackendType, compile_specs: List[CompileSpec]
+) -> List[PyQnnManager.QnnManager]:
+    active_registry = getattr(_current_qnn_managers, "active_registry", None)
+    if active_registry is None:
+        option = generate_qnn_executorch_option(compile_specs)
+        return [QnnManagerRegistry().get_or_create_qnn_manager(backend_type, option)]
+    managers = [
+        manager
+        for (registered_backend, _), manager in active_registry._registry.items()
+        if registered_backend == backend_type
+    ]
+    if not managers:
+        raise RuntimeError(f"No QNN manager active for {backend_type.name}")
+    return managers
+
+
 def get_current_qnn_manager(
     backend_type: QnnExecuTorchBackendType, compile_specs: List[CompileSpec]
 ) -> PyQnnManager.QnnManager:
-    """
-    Retrieves the QnnManager instance active for the current QnnManagerContext invocation.
-    Return a new QnnManger if no QnnManager is active for the given backend_type in the current context.
-    """
-    active_registry = getattr(_current_qnn_managers, "active_registry", None)
-    if active_registry is None or backend_type not in active_registry._registry:
-        logging.warning(
-            f"No QnnManager active for backend type {backend_type.name} in the current QnnManagerContext. "
-            "It would be better to use to_edge_transform_and_lower_to_qnn to lowering to QNN Backend."
-        )
-        return QnnManagerRegistry().get_or_create_qnn_manager(
-            backend_type, generate_qnn_executorch_option(compile_specs)
-        )
-    return active_registry._registry[backend_type]
+    return get_current_qnn_managers(backend_type, compile_specs)[0]

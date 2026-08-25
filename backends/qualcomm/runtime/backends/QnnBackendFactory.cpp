@@ -72,6 +72,7 @@ std::unique_ptr<BackendConfigParameters> QnnBackendFactory::Create(
           qnn_device_ptr,
           backend_params->qnn_backend_cache_ptr_.get(),
           htp_options,
+          options->fcb_options(),
           qnn_dlc_manager,
           get_option(options->profile_level(), QNN_RUNTIME_PROFILE_LEVEL));
 

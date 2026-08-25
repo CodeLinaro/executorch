@@ -239,6 +239,11 @@ PYBIND11_MODULE(PyQnnManagerAdaptor, m) {
               const std::vector<std::string>&,
               std::vector<std::vector<std::shared_ptr<OpWrapper>>>&>(
               &PyQnnManager::Compile))
+      .def("CreateDlc", &PyQnnManager::CreateDlc)
+      .def("CompileToDlc", &PyQnnManager::CompileToDlc)
+      .def("GetDlcBinary", &PyQnnManager::GetDlcBinary)
+      .def("FreeDlc", &PyQnnManager::FreeDlc)
+      .def("GetDlcRecordCount", &PyQnnManager::GetDlcRecordCount)
       .def("Destroy", &PyQnnManager::Destroy)
       .def("DestroyContext", &PyQnnManager::DestroyContext)
       .def("IsAvailable", &PyQnnManager::IsAvailable)

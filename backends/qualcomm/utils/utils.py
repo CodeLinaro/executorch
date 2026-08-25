@@ -36,6 +36,7 @@ from executorch.backends.qualcomm.serialization.qc_schema import (
     QcomChipset,
     QnnExecuTorchBackendOptions,
     QnnExecuTorchBackendType,
+    QnnExecuTorchFcbOptions,
     QnnExecuTorchGpuBackendOptions,
     QnnExecuTorchGpuPrecision,
     QnnExecuTorchHtpBackendOptions,
@@ -1148,7 +1149,7 @@ def generate_lpai_compiler_spec(
 
 
 def generate_qnn_executorch_compiler_spec(  # noqa: C901
-    soc_model: QcomChipset,
+    soc_model: QcomChipset | None,
     backend_options: QnnExecuTorchBackendOptions,
     debug: bool = False,
     saver: bool = False,
@@ -1159,6 +1160,8 @@ def generate_qnn_executorch_compiler_spec(  # noqa: C901
     is_from_context_binary: bool = False,
     op_package_options: QnnExecuTorchOpPackageOptions = None,
     use_mha2sha: bool = False,
+    soc_models: List[QcomChipset] | None = None,
+    reference_weight_sharing_enabled: bool = True,
 ) -> List[CompileSpec]:
     """
     Helper function generating compiler specs for Qualcomm AI Engine Direct
@@ -1197,9 +1200,15 @@ def generate_qnn_executorch_compiler_spec(  # noqa: C901
         ValueError: The value QcomChipset is currently not supported.
         ValueError: Confliction between compiler specs.
     """
-    _supported_soc_models = {soc_model.value for soc_model in QcomChipset}
-    if soc_model not in _supported_soc_models:
-        raise ValueError(f"unknown SoC model for QNN: {soc_model}")
+    soc_models = [soc_model] if soc_models is None else soc_models
+    if not soc_models or len(set(soc_models)) != len(soc_models):
+        raise ValueError("soc_models must contain unique QcomChipset values")
+    if any(model not in {chipset.value for chipset in QcomChipset} for model in soc_models):
+        raise ValueError(f"unknown SoC model for QNN: {soc_models}")
+    if len(soc_models) > 1 and backend_options.backend_type != QnnExecuTorchBackendType.kHtpBackend:
+        raise ValueError("FCB requires the HTP backend")
+    if len(soc_models) > 1 and online_prepare:
+        raise ValueError("FCB requires offline_prepare")
 
     if profile_level and dump_intermediate_outputs:
         warnings.warn(
@@ -1209,8 +1218,13 @@ def generate_qnn_executorch_compiler_spec(  # noqa: C901
         )
 
     qnn_executorch_options = QnnExecuTorchOptions(
-        _soc_info_table[soc_model], backend_options
+        _soc_info_table[soc_models[0]], backend_options
     )
+    if len(soc_models) > 1:
+        qnn_executorch_options.fcb_options = QnnExecuTorchFcbOptions(
+            soc_infos=[_soc_info_table[model] for model in soc_models],
+            reference_weight_sharing_enabled=reference_weight_sharing_enabled,
+        )
     qnn_executorch_options.log_level = (
         QnnExecuTorchLogLevel.kLogLevelDebug
         if debug

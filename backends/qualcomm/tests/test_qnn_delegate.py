@@ -11196,6 +11196,7 @@ class TestUtilsScript(TestQNN):
             ]
         )
 
+
     def test_cli(self):
         # TODO: Add gpu support in cli.py
         if get_backend_type(self.backend) == QnnExecuTorchBackendType.kGpuBackend:

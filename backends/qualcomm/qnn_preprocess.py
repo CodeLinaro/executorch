@@ -30,6 +30,7 @@ from executorch.backends.qualcomm.utils.constants import (
 )
 from executorch.backends.qualcomm.utils.qnn_manager_lifecycle import (
     get_current_qnn_manager,
+    get_current_qnn_managers,
 )
 from executorch.exir.backend.backend_details import (
     BackendDetails,
@@ -171,7 +172,66 @@ class QnnBackend(BackendDetails):
         ), "Only graphs with the same number of partitions could be used"
 
         all_processed_results = {key: [] for key in edge_programs.keys()}
+        fcb_options = option.fcb_options
         num_sub_graphs = next(iter(num_sub_graphs))
+        if fcb_options is not None:
+            qnn_managers = get_current_qnn_managers(
+                option.backend_options.backend_type, compile_spec
+            )
+            assert len(qnn_managers) == len(fcb_options.soc_infos)
+            debug_handle_builder = DelegateMappingBuilder(generated_identifiers=False)
+            max_live_contexts = 0
+            intermediate_context_binary_bytes_in_python = 0
+            for i in range(num_sub_graphs):
+                dlc_handle = qnn_managers[0].CreateDlc()
+                try:
+                    for qnn_manager in qnn_managers:
+                        qnn_manager.InitContext(graph_names)
+                        max_live_contexts = max(max_live_contexts, 1)
+                        try:
+                            py_op_wrapper_list = []
+                            for j, programs in enumerate(edge_programs.values()):
+                                logger.info(
+                                    f"Processing Method({j}): ({i + 1}/{num_sub_graphs})"
+                                )
+                                py_op_wrappers = QnnBackend._build_op_wrappers(
+                                    programs[i],
+                                    qnn_manager.IsTensorDump(),
+                                    option.op_package_options.op_package_infos,
+                                    option.use_mha2sha,
+                                    option.backend_options.backend_type,
+                                )
+                                py_op_wrapper_list.append(
+                                    [wrapper.GetOpWrapper() for wrapper in py_op_wrappers]
+                                )
+                            qnn_manager.CompileToDlc(
+                                graph_names, py_op_wrapper_list, dlc_handle
+                            )
+                        finally:
+                            qnn_manager.DestroyContext()
+                    cache_record_count = int(
+                        qnn_managers[0].GetDlcRecordCount(dlc_handle, 0x07)
+                    )
+                    raw_weight_record_count = int(
+                        qnn_managers[0].GetDlcRecordCount(dlc_handle, 0x04)
+                    )
+                    dlc_binary = bytes(qnn_managers[0].GetDlcBinary(dlc_handle))
+                finally:
+                    qnn_managers[0].FreeDlc(dlc_handle)
+                for key in edge_programs:
+                    all_processed_results[key].append(
+                        PreprocessResult(
+                            processed_bytes=dlc_binary,
+                            debug_handle_map=debug_handle_builder.get_delegate_mapping(),
+                        )
+                    )
+            QnnBackend.last_fcb_stats = {
+                "max_live_contexts": max_live_contexts,
+                "intermediate_context_binary_bytes_in_python": intermediate_context_binary_bytes_in_python,
+                "cache_record_count": cache_record_count,
+                "raw_weight_record_count": raw_weight_record_count,
+            }
+            return all_processed_results
         qnn_manager = get_current_qnn_manager(
             option.backend_options.backend_type, compile_spec
         )

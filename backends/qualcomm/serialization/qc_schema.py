@@ -289,6 +289,12 @@ class QnnExecuTorchOpPackageOptions:
 
 
 @dataclass
+class QnnExecuTorchFcbOptions:
+    soc_infos: List[SocInfo] = field(default_factory=list)
+    reference_weight_sharing_enabled: bool = False
+
+
+@dataclass
 class QnnExecuTorchOptions:
     soc_info: SocInfo
     backend_options: QnnExecuTorchBackendOptions
@@ -305,3 +311,4 @@ class QnnExecuTorchOptions:
         default_factory=QnnExecuTorchOpPackageOptions
     )
     use_mha2sha: bool = False
+    fcb_options: Optional[QnnExecuTorchFcbOptions] = None

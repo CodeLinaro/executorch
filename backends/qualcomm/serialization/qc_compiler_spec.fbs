@@ -325,6 +325,15 @@ table QnnExecuTorchBackendOptions {
   lpai_options:QnnExecuTorchLpaiBackendOptions;
 }
 
+/// Options for an offline-prepared multi-SoC HTP DLC.
+table QnnExecuTorchFcbOptions {
+  /// All target SoCs. soc_info remains the primary target for compatibility.
+  soc_infos:[SocInfo];
+
+  /// Enable QNN HTP DLC reference-weight sharing.
+  reference_weight_sharing_enabled:bool;
+}
+
 table QnnExecuTorchOptions {
   /// Specify SoC to compile or execute for.
   soc_info:SocInfo;
@@ -365,6 +374,9 @@ table QnnExecuTorchOptions {
 
   /// This experimental parameter is used to decide whether to enable multi-head attention to single-head attention pass, aiming to reduce time consumption in AOT and improve performance on HTP.
   use_mha2sha:bool;
+
+  /// Emit a multi-SoC DLC instead of one device context binary.
+  fcb_options:QnnExecuTorchFcbOptions;
 }
 
 root_type QnnExecuTorchOptions;
