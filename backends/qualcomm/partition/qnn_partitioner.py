@@ -75,7 +75,10 @@ class QnnOperatorSupport(OperatorSupportBase):
         self.phase = phase
         self.nodes_to_wrappers = defaultdict(dict)
         target_socs = (
-            [target.soc_info.soc_model for target in python_options.target_options.targets]
+            [
+                target.soc_info.soc_model
+                for target in python_options.target_options.targets
+            ]
             if python_options.target_options is not None
             else [python_options.soc_info.soc_model]
         )

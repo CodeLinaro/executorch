@@ -6,7 +6,7 @@
 
 import logging
 from collections import defaultdict
-from typing import Dict, List, Literal, Tuple, Union, final
+from typing import Dict, final, List, Literal, Tuple, Union
 
 import executorch.backends.qualcomm.python.PyQnnManagerAdaptor as PyQnnManager
 import torch  # noqa: F401
@@ -195,12 +195,12 @@ class QnnBackend(BackendDetails):
 
     @staticmethod
     def _populate_delegate_mapping(
-        debug_handle_builder: DelegateMappingBuilder, 
+        debug_handle_builder: DelegateMappingBuilder,
         num_partitions: int,
-        edge_programs: Dict[str, List[ExportedProgram]]
+        edge_programs: Dict[str, List[ExportedProgram]],
     ):
         for i in range(num_partitions):
-            for j, programs in enumerate(edge_programs.values()):
+            for _j, programs in enumerate(edge_programs.values()):
                 for node in programs[i].graph.nodes:
                     # Skip multi-output nodes: devtools only supports
                     # single-output intermediate capture (len == 1).
@@ -213,6 +213,7 @@ class QnnBackend(BackendDetails):
                             handles=handle_id,
                             identifier=node.meta[QCOM_TENSOR_NAME][0],
                         )
+
     @staticmethod
     def _get_op_wrappers(
         option: QnnExecuTorchOptions,
@@ -230,7 +231,9 @@ class QnnBackend(BackendDetails):
         for i in range(num_partitions):
             subgraph_op_wrapper, subgraph_ctx_binary = {}, {}
             for key, programs in edge_programs.items():
-                logger.info(f"Extracting OpWrapper for Method({key}): ({i+1}/{num_partitions})")
+                logger.info(
+                    f"Extracting OpWrapper for Method({key}): ({i+1}/{num_partitions})"
+                )
                 py_op_wrappers = QnnBackend._build_op_wrappers(
                     programs[i],
                     option.dump_intermediate_outputs,
@@ -262,19 +265,21 @@ class QnnBackend(BackendDetails):
                     ctx_binary_list.append(subgraph_ctx_binary)
                 case _:
                     raise ValueError("Unexpected wrapper_type")
-        return (wrapper_type, py_op_wrapper_list if wrapper_type == "op_wrapper" else ctx_binary_list)
+        return (
+            wrapper_type,
+            py_op_wrapper_list if wrapper_type == "op_wrapper" else ctx_binary_list,
+        )
 
     @staticmethod
     def _get_compile_func(qnn_manager: PyQnnManager.QnnManager):
         def compile_func(graph_names, op_wrapper_list):
             qnn_manager.InitContext(graph_names)
             try:
-                qnn_context_binary = qnn_manager.Compile(
-                    graph_names, op_wrapper_list
-                )
+                qnn_context_binary = qnn_manager.Compile(graph_names, op_wrapper_list)
             finally:
                 qnn_manager.DestroyContext()
             return qnn_context_binary
+
         return compile_func
 
     @staticmethod
@@ -286,9 +291,7 @@ class QnnBackend(BackendDetails):
                     qnn_manager.InitContext(graph_names)
                     try:
                         qnn_manager.CompileToDlc(
-                            graph_names,
-                            op_wrapper_list,
-                            dlc_handle
+                            graph_names, op_wrapper_list, dlc_handle
                         )
                     finally:
                         qnn_manager.DestroyContext()
@@ -296,6 +299,7 @@ class QnnBackend(BackendDetails):
             finally:
                 qnn_managers[0].FreeDlc(dlc_handle)
             return dlc_binary
+
         return compile_func
 
     @staticmethod
@@ -342,7 +346,7 @@ class QnnBackend(BackendDetails):
                                 processed_bytes=op_wrappers[i][key],
                                 debug_handle_map=debug_handle_builder.get_delegate_mapping(),
                             )
-                        ) 
+                        )
             case "op_wrapper":
                 if option.target_options is not None:
                     qnn_managers = [
@@ -370,7 +374,7 @@ class QnnBackend(BackendDetails):
                                 processed_bytes=context_binary,
                                 debug_handle_map=debug_handle_builder.get_delegate_mapping(),
                             )
-                        ) 
+                        )
             case _:
                 raise ValueError("Unexpected wrapper type")
         return all_processed_results

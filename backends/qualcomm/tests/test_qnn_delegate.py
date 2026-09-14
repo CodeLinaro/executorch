@@ -13,11 +13,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
 from dataclasses import dataclass
 from functools import partial
 from multiprocessing.connection import Listener
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 import torch
 from executorch.backends.qualcomm._passes.qnn_pass_manager import (
@@ -36,8 +36,9 @@ from executorch.backends.qualcomm.serialization.qc_schema import (
     QnnExecuTorchBackendType,
     QnnExecuTorchHtpPerformanceMode,
 )
-from executorch.backends.qualcomm.serialization.qc_schema_serialize import flatbuffer_to_option
-from executorch.backends.qualcomm.utils import qnn_manager_lifecycle as lifecycle
+from executorch.backends.qualcomm.serialization.qc_schema_serialize import (
+    flatbuffer_to_option,
+)
 
 from executorch.backends.qualcomm.tests.utils import (
     convert_pt2e,
@@ -48,6 +49,7 @@ from executorch.backends.qualcomm.tests.utils import (
     TestQNN,
     validate_context_binary,
 )
+from executorch.backends.qualcomm.utils import qnn_manager_lifecycle as lifecycle
 from executorch.backends.qualcomm.utils.check_qnn_version import (
     is_qnn_sdk_version_greater_than,
     is_qnn_sdk_version_less_than,
@@ -77,13 +79,6 @@ from executorch.backends.qualcomm.utils.utils import (
 )
 
 from executorch.backends.qualcomm.tests.models import *  # noqa: F403
-from executorch.backends.qualcomm.tests.fcb_utils import (
-    fcb_target_socs,
-    lower_fcb_weight_sharing_model,
-    make_fcb_weight_sharing_model,
-    make_fcb_weight_sharing_specs,
-)
-
 import os
 import random
 
@@ -93,6 +88,12 @@ from typing import List
 from executorch.backends.qualcomm._passes import FoldQDQ, TagQuantIO
 from executorch.backends.qualcomm.builders.node_visitor_manager import get_node_visitors
 from executorch.backends.qualcomm.debugger.utils import DrawGraph
+from executorch.backends.qualcomm.tests.fcb_utils import (
+    fcb_target_socs,
+    lower_fcb_weight_sharing_model,
+    make_fcb_weight_sharing_model,
+    make_fcb_weight_sharing_specs,
+)
 from executorch.examples.models.deeplab_v3 import DeepLabV3ResNet101Model
 from executorch.examples.models.edsr import EdsrModel
 from executorch.examples.models.inception_v3 import InceptionV3Model
@@ -8252,7 +8253,9 @@ class TestQNNQuantizedUtils(TestQNN):
 
     def test_qnn_backend_multi_contexts_composite(self):
         if self.enable_x86_64:
-            self.skipTest("x86 simulator does not meet quantized composite accuracy tolerance")
+            self.skipTest(
+                "x86 simulator does not meet quantized composite accuracy tolerance"
+            )
         backend_options = generate_htp_compiler_spec(
             use_fp16=False,
             use_dlbc=True,
