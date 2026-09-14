@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 from dataclasses import dataclass
 from functools import partial
 from multiprocessing.connection import Listener
@@ -31,9 +32,12 @@ from executorch.backends.qualcomm.export_utils import (
 )
 from executorch.backends.qualcomm.quantizer.rules import Q_ANNOTATION_KEY
 from executorch.backends.qualcomm.serialization.qc_schema import (
+    QcomChipset,
     QnnExecuTorchBackendType,
     QnnExecuTorchHtpPerformanceMode,
 )
+from executorch.backends.qualcomm.serialization.qc_schema_serialize import flatbuffer_to_option
+from executorch.backends.qualcomm.utils import qnn_manager_lifecycle as lifecycle
 
 from executorch.backends.qualcomm.tests.utils import (
     convert_pt2e,
@@ -11777,6 +11781,51 @@ class TestUtilsScript(TestQNN):
                         f"Generated recipe file has syntax error: {e}\n{py_content}"
                     )
                 self.assertIn("HOW TO USE THESE RECIPES", py_content)
+
+
+class TestQNNFcbContracts(unittest.TestCase):
+    def test_fcb_compiler_spec_preserves_targets(self):
+        options = [
+            generate_htp_compiler_spec(use_fp16=False),
+            generate_htp_compiler_spec(use_fp16=True),
+        ]
+        compiler_specs = generate_qnn_executorch_compiler_spec(
+            soc_model=[QcomChipset.SM8650, QcomChipset.SM8750],
+            backend_options=options,
+        )
+        option = flatbuffer_to_option(compiler_specs[0].value)
+
+        self.assertEqual(
+            [target.soc_info.soc_model for target in option.target_options.targets],
+            [QcomChipset.SM8650, QcomChipset.SM8750],
+        )
+
+    def test_fcb_manager_cache_is_keyed_by_soc(self):
+        managers = [Mock(), Mock(), Mock()]
+        for manager in managers:
+            manager.InitBackend.return_value = Mock(value=0)
+
+        with (
+            patch.object(lifecycle, "setup_qnn_sdk"),
+            patch.object(lifecycle, "disable_mkldnn_on_amd"),
+            patch.object(
+                lifecycle.PyQnnManager, "QnnManager", side_effect=managers
+            ) as create,
+        ):
+            registry = lifecycle.QnnManagerRegistry()
+            first = registry.get_or_create_qnn_manager(
+                QnnExecuTorchBackendType.kHtpBackend, b"first", QcomChipset.SM8650
+            )
+            second = registry.get_or_create_qnn_manager(
+                QnnExecuTorchBackendType.kHtpBackend, b"second", QcomChipset.SM8750
+            )
+            third = registry.get_or_create_qnn_manager(
+                QnnExecuTorchBackendType.kHtpBackend, b"third", QcomChipset.SM8650
+            )
+
+        self.assertEqual(create.call_count, 2)
+        self.assertIsNot(first, second)
+        self.assertIs(first, third)
 
 
 def setup_environment():
