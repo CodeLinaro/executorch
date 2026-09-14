@@ -12,8 +12,19 @@ from executorch.backends.qualcomm.export_utils import (
     generate_htp_compiler_spec,
     generate_qnn_executorch_compiler_spec,
 )
-from executorch.backends.qualcomm.serialization.qc_schema_serialize import flatbuffer_to_option
-from executorch.backends.qualcomm.tests.rework.conftest import Tolerance, export_and_verify
+from executorch.backends.qualcomm.serialization.qc_schema_serialize import (
+    flatbuffer_to_option,
+)
+from executorch.backends.qualcomm.tests.fcb_utils import (
+    fcb_target_socs,
+    lower_fcb_weight_sharing_model,
+    make_fcb_weight_sharing_model,
+    make_fcb_weight_sharing_specs,
+)
+from executorch.backends.qualcomm.tests.rework.conftest import (
+    Tolerance,
+    export_and_verify,
+)
 from executorch.backends.qualcomm.utils import qnn_manager_lifecycle as lifecycle
 
 
@@ -64,7 +75,9 @@ def test_fcb_e2e(qnn_config):
         pytest.skip("FCB execution requires an Android HTP target")
 
     selected_soc = getattr(QcomChipset, qnn_config.soc_model)
-    other_soc = QcomChipset.SM8650 if selected_soc != QcomChipset.SM8650 else QcomChipset.SM8750
+    other_soc = (
+        QcomChipset.SM8650 if selected_soc != QcomChipset.SM8650 else QcomChipset.SM8750
+    )
     compile_specs = generate_qnn_executorch_compiler_spec(
         soc_model=[selected_soc, other_soc],
         backend_options=[
@@ -80,5 +93,37 @@ def test_fcb_e2e(qnn_config):
         qnn_config,
         None,
         compile_specs,
+        Tolerance(),
+    )
+
+
+def test_fcb_reference_weight_sharing_reduces_pte_size(qnn_config):
+    if qnn_config.build_folder == "build-x86":
+        pytest.skip("FCB reference-weight sharing requires an Android HTP target")
+
+    module, inputs = make_fcb_weight_sharing_model()
+    soc_models = fcb_target_socs(getattr(QcomChipset, qnn_config.soc_model))
+    shared = lower_fcb_weight_sharing_model(
+        module, inputs, make_fcb_weight_sharing_specs(soc_models, True)
+    )
+    unshared = lower_fcb_weight_sharing_model(
+        module, inputs, make_fcb_weight_sharing_specs(soc_models, False)
+    )
+
+    assert len(shared.buffer) < len(unshared.buffer)
+
+
+def test_fcb_reference_weight_sharing_e2e(qnn_config):
+    if qnn_config.build_folder == "build-x86":
+        pytest.skip("FCB reference-weight sharing requires an Android HTP target")
+
+    module, inputs = make_fcb_weight_sharing_model()
+    soc_models = fcb_target_socs(getattr(QcomChipset, qnn_config.soc_model))
+    export_and_verify(
+        module,
+        inputs,
+        qnn_config,
+        None,
+        make_fcb_weight_sharing_specs(soc_models, True),
         Tolerance(),
     )

@@ -77,6 +77,12 @@ from executorch.backends.qualcomm.utils.utils import (
 )
 
 from executorch.backends.qualcomm.tests.models import *  # noqa: F403
+from executorch.backends.qualcomm.tests.fcb_utils import (
+    fcb_target_socs,
+    lower_fcb_weight_sharing_model,
+    make_fcb_weight_sharing_model,
+    make_fcb_weight_sharing_specs,
+)
 
 import os
 import random
@@ -11826,6 +11832,40 @@ class TestQNNFcbContracts(unittest.TestCase):
         self.assertEqual(create.call_count, 2)
         self.assertIsNot(first, second)
         self.assertIs(first, third)
+
+
+class TestQNNFcbWeightSharing(TestQNN):
+    def setUp(self):
+        if self.enable_x86_64:
+            self.skipTest("FCB reference-weight sharing requires an Android HTP target")
+        if is_qnn_sdk_version_less_than("2.48"):
+            self.skipTest("FCB reference-weight sharing requires QNN SDK 2.48")
+
+        self.module, self.inputs = make_fcb_weight_sharing_model()
+        self.soc_models = fcb_target_socs(self.chipset_table[TestQNN.soc_model])
+
+    def test_fcb_reference_weight_sharing_reduces_pte_size(self):
+        shared = lower_fcb_weight_sharing_model(
+            self.module,
+            self.inputs,
+            make_fcb_weight_sharing_specs(self.soc_models, True),
+        )
+        unshared = lower_fcb_weight_sharing_model(
+            self.module,
+            self.inputs,
+            make_fcb_weight_sharing_specs(self.soc_models, False),
+        )
+
+        self.assertLess(len(shared.buffer), len(unshared.buffer))
+
+    def test_fcb_reference_weight_sharing_e2e(self):
+        executorch_program = lower_fcb_weight_sharing_model(
+            self.module,
+            self.inputs,
+            make_fcb_weight_sharing_specs(self.soc_models, True),
+        )
+
+        self.verify_output(self.module, self.inputs, executorch_program)
 
 
 def setup_environment():
