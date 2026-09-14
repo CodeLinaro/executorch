@@ -33,8 +33,6 @@ from executorch.backends.qualcomm.serialization.qc_schema import (
     QcomChipset,
     QnnExecuTorchBackendOptions,
     QnnExecuTorchBackendType,
-    QnnExecuTorchTarget,
-    QnnExecuTorchTargetOptions,
     QnnExecuTorchGpuBackendOptions,
     QnnExecuTorchGpuPerformanceMode,
     QnnExecuTorchGpuPrecision,
@@ -49,6 +47,8 @@ from executorch.backends.qualcomm.serialization.qc_schema import (
     QnnExecuTorchOpPackageOptions,
     QnnExecuTorchOptions,
     QnnExecuTorchProfileLevel,
+    QnnExecuTorchTarget,
+    QnnExecuTorchTargetOptions,
 )
 from executorch.backends.qualcomm.serialization.qc_schema_serialize import (
     flatbuffer_to_option,

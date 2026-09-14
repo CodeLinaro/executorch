@@ -7,10 +7,10 @@ import pytest
 import torch
 
 from executorch.backends.qualcomm.export_utils import (
-    QcomChipset,
-    QnnExecuTorchBackendType,
     generate_htp_compiler_spec,
     generate_qnn_executorch_compiler_spec,
+    QcomChipset,
+    QnnExecuTorchBackendType,
 )
 from executorch.backends.qualcomm.serialization.qc_schema_serialize import (
     flatbuffer_to_option,
@@ -22,8 +22,8 @@ from executorch.backends.qualcomm.tests.fcb_utils import (
     make_fcb_weight_sharing_specs,
 )
 from executorch.backends.qualcomm.tests.rework.conftest import (
-    Tolerance,
     export_and_verify,
+    Tolerance,
 )
 from executorch.backends.qualcomm.utils import qnn_manager_lifecycle as lifecycle
 
