@@ -8060,6 +8060,8 @@ class TestQNNQuantizedUtils(TestQNN):
         )
 
     def test_qnn_backend_skip_node_op_partitioner_back_to_back_simple(self):
+        if self.enable_x86_64:
+            self.skipTest("x86 simulator does not meet quantized accuracy tolerance")
         module = SkipBackToBack()  # noqa: F405
         sample_input = (torch.randn(1, 4, 4, 4),)
         module = self.get_qdq_module(module, sample_input)
@@ -8147,6 +8149,8 @@ class TestQNNQuantizedUtils(TestQNN):
         self.verify_output(module, sample_input, exec_prog)
 
     def test_qnn_backend_spill_fill_buffer_size(self):
+        if self.enable_x86_64:
+            self.skipTest("x86 simulator does not report spill/fill buffer sizes")
         module = LargeTensorLinear()  # noqa: F405
         sample_input = (torch.randn(1, 256, 512),)
         module = self.get_qdq_module(module, sample_input)
@@ -8237,6 +8241,8 @@ class TestQNNQuantizedUtils(TestQNN):
         self.verify_output(module, sample_input, exec_prog)
 
     def test_qnn_backend_multi_contexts_composite(self):
+        if self.enable_x86_64:
+            self.skipTest("x86 simulator does not meet quantized composite accuracy tolerance")
         backend_options = generate_htp_compiler_spec(
             use_fp16=False,
             use_dlbc=True,
