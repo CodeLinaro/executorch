@@ -15,10 +15,7 @@
   ((QNN_API_VERSION_MAJOR > (major)) ||                       \
    (QNN_API_VERSION_MAJOR == (major) && QNN_API_VERSION_MINOR >= (minor)))
 
-// Product-release requirement: FCB requires QAIRT SDK 2.48 or newer. That
-// release provides QNN API 2.37, which adds the required core, System DLC,
-// and HTP declarations. Keep this mapping here when a new SDK release changes
-// the FCB interface requirement.
+// FCB requires QAIRT SDK 2.48 or newer.
 #if QNN_EXECUTORCH_QNN_API_VERSION_AT_LEAST(2, 37)
 #define QNN_EXECUTORCH_SUPPORTS_FCB 1
 #else

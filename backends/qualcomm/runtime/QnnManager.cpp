@@ -722,6 +722,11 @@ Error QnnManager::CompileDlc() {
 Error QnnManager::Compile(
     const std::string& graph_name,
     std::vector<std::shared_ptr<OpWrapper>>& op_wrappers) {
+
+  // TODO decouple QNN tensor ID from op_wrappers into graph-level
+  // so that the compile function doesn't modify op_wrapper
+  // the type can be changed to const std::vector<std::shared_ptr<const OpWrapper>>& op_wrappers
+  // this also resolve race condition if we compile same wrapper in multiple thread. 
   OpWrapperGraphStateGuard reset_graph_state(op_wrappers);
   Qnn_ErrorHandle_t error = QNN_SUCCESS;
   QnnGraph* qnn_graph_ptr = backend_params_ptr_->qnn_graph_ptr_.get();

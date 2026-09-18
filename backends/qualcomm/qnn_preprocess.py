@@ -48,21 +48,6 @@ DEFAULT_GRAPH_NAME = "forward"
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-
-@dataclass(frozen=True)
-class _ContextBinaryPartitions:
-    """Partitions supplied by context-loader nodes; compilation is bypassed."""
-
-    partitions: List[Dict[str, bytes]]
-
-
-@dataclass(frozen=True)
-class _OpWrapperPartitions:
-    """Partitions that must be compiled into QNN context binaries."""
-
-    partitions: List[Dict[str, List[PyQnnManager.OpWrapper]]]
-
-
 def _check_io_binding(edge_program: ExportedProgram, nodes_to_wrappers) -> None:
     """Fail here if QNN's graph I/O will not line up with the delegate signature.
 
@@ -211,71 +196,20 @@ class QnnBackend(BackendDetails):
     @staticmethod
     def _populate_delegate_mapping(
         debug_handle_builder: DelegateMappingBuilder,
-        num_partitions: int,
-        edge_programs: Dict[str, List[ExportedProgram]],
+        program: ExportedProgram,
     ):
-        for i in range(num_partitions):
-            for _j, programs in enumerate(edge_programs.values()):
-                for node in programs[i].graph.nodes:
-                    # Skip multi-output nodes: devtools only supports
-                    # single-output intermediate capture (len == 1).
-                    if (
-                        (handle_id := node.meta.get(DEBUG_HANDLE_KEY))
-                        and QCOM_TENSOR_NAME in node.meta
-                        and len(node.meta[QCOM_TENSOR_NAME]) == 1
-                    ):
-                        debug_handle_builder.insert_delegate_mapping_entry(
-                            handles=handle_id,
-                            identifier=node.meta[QCOM_TENSOR_NAME][0],
-                        )
-
-    @staticmethod
-    def _get_op_wrappers(
-        option: QnnExecuTorchOptions,
-        num_partitions: int,
-        edge_programs: Dict[str, List[ExportedProgram]],
-    ) -> _ContextBinaryPartitions | _OpWrapperPartitions:
-        op_wrapper_partitions, context_binary_partitions = [], []
-        result_type = None
-        for i in range(num_partitions):
-            subgraph_op_wrapper, subgraph_ctx_binary = {}, {}
-            for key, programs in edge_programs.items():
-                logger.info(
-                    f"Extracting OpWrapper for Method({key}): ({i + 1}/{num_partitions})"
+        for node in program.graph.nodes:
+            # Skip multi-output nodes: devtools only supports
+            # single-output intermediate capture (len == 1).
+            if (
+                (handle_id := node.meta.get(DEBUG_HANDLE_KEY))
+                and QCOM_TENSOR_NAME in node.meta
+                and len(node.meta[QCOM_TENSOR_NAME]) == 1
+            ):
+                debug_handle_builder.insert_delegate_mapping_entry(
+                    handles=handle_id,
+                    identifier=node.meta[QCOM_TENSOR_NAME][0],
                 )
-                py_op_wrappers = QnnBackend._build_op_wrappers(
-                    programs[i],
-                    option.dump_intermediate_outputs,
-                    option.op_package_options.op_package_infos,
-                    option.use_mha2sha,
-                    option.backend_options.backend_type,
-                )
-                if isinstance(py_op_wrappers, bytes):
-                    if result_type is _OpWrapperPartitions:
-                        raise RuntimeError("Hybrid compilation is not supported")
-                    result_type = _ContextBinaryPartitions
-
-                    subgraph_ctx_binary[key] = py_op_wrappers
-                else:
-                    if result_type is _ContextBinaryPartitions:
-                        raise RuntimeError("Hybrid compilation is not supported")
-                    result_type = _OpWrapperPartitions
-
-                    subgraph_op_wrapper[key] = [
-                        py_op_wrapper.GetOpWrapper() for py_op_wrapper in py_op_wrappers
-                    ]
-            if result_type is _OpWrapperPartitions:
-                op_wrapper_partitions.append(subgraph_op_wrapper)
-            elif result_type is _ContextBinaryPartitions:
-                context_binary_partitions.append(subgraph_ctx_binary)
-            else:
-                raise ValueError("Unexpected preprocessing result")
-
-        if result_type is _OpWrapperPartitions:
-            return _OpWrapperPartitions(op_wrapper_partitions)
-        if result_type is _ContextBinaryPartitions:
-            return _ContextBinaryPartitions(context_binary_partitions)
-        raise ValueError("Unexpected preprocessing result")
 
     @staticmethod
     def _get_compile_func(qnn_manager: PyQnnManager.QnnManager):
@@ -330,38 +264,54 @@ class QnnBackend(BackendDetails):
 
         num_partitions = next(iter(num_partitions))
 
-        result = QnnBackend._get_op_wrappers(option, num_partitions, edge_programs)
-
-        # QNN preprocessing assigns the final QCOM_TENSOR_NAME metadata used as
-        # delegate identifiers, so build this mapping only after wrappers exist.
         debug_handle_builder = DelegateMappingBuilder(generated_identifiers=False)
-        if option.dump_intermediate_outputs:
-            QnnBackend._populate_delegate_mapping(
-                debug_handle_builder, num_partitions, edge_programs
-            )
+
+        is_fcb = option.target_options is not None
+        if is_fcb:
+            qnn_managers = [
+                get_current_qnn_manager(compile_spec, target.soc_info.soc_model)
+                for target in option.target_options.targets
+            ]
+            compile_func = QnnBackend._get_compile_func_fcb(qnn_managers)
+        else:
+            qnn_manager = get_current_qnn_manager(compile_spec)
+            compile_func = QnnBackend._get_compile_func(qnn_manager)
 
         all_processed_results = {key: [] for key in edge_programs}
-        if isinstance(result, _ContextBinaryPartitions):
-            for i in range(num_partitions):
-                for key in edge_programs:
+        for i in range(num_partitions):
+            method_to_ith_partition_wrapper = {
+                key: py_op_wrappers = QnnBackend._build_op_wrappers(
+                    programs[i],
+                    option.dump_intermediate_outputs,
+                    option.op_package_options.op_package_infos,
+                    option.use_mha2sha,
+                    option.backend_options.backend_type,
+                )
+                for key, program in edge_programs.items()
+            }
+
+            # QNN preprocessing assigns the final QCOM_TENSOR_NAME metadata used as
+            # delegate identifiers, so build this mapping only after wrappers exist.
+            if option.dump_intermediate_outputs:
+                for edge_program in edge_programs.values()
+                    QnnBackend._populate_delegate_mapping(debug_handle_builder, edge_program[i])
+
+            # ensure not mixed
+            wrapper_types = set(map(type, method_to_ith_partition_wrapper.values()))
+            if len(wrapper_types) != 1:
+                raise RuntimeError("Hybrid compilation is not supported")
+            wrapper_type = next(iter(wrapper_types))
+
+            if wrapper_type == bytes:
+                for key, wrapper in method_to_ith_partition_wrapper.items():
                     all_processed_results[key].append(
                         PreprocessResult(
-                            processed_bytes=result.partitions[i][key],
+                            processed_bytes=wrapper,
                             debug_handle_map=debug_handle_builder.get_delegate_mapping(),
                         )
                     )
-        else:
-            if option.target_options is not None:
-                qnn_managers = [
-                    get_current_qnn_manager(compile_spec, target.soc_info.soc_model)
-                    for target in option.target_options.targets
-                ]
-                compile_func = QnnBackend._get_compile_func_fcb(qnn_managers)
-            else:
-                qnn_manager = get_current_qnn_manager(compile_spec)
-                compile_func = QnnBackend._get_compile_func(qnn_manager)
-            for i in range(num_partitions):
-                op_wrapper_list = list(result.partitions[i].values())
+            elif wrapper_type == PyQnnManager.OpWrapper:
+                op_wrapper_list = list(method_to_ith_partition_wrapper.values())
                 context_binary = compile_func(graph_names, op_wrapper_list)
                 if option.saver:
                     # TODO: Currently, only the first method is saved. Update this logic if saving multiple methods becomes necessary in the future.
@@ -378,4 +328,6 @@ class QnnBackend(BackendDetails):
                             debug_handle_map=debug_handle_builder.get_delegate_mapping(),
                         )
                     )
-        return all_processed_results
+            else:
+                raise ValueError("Unexpected preprocessing op wrapper type")
+       return all_processed_results
