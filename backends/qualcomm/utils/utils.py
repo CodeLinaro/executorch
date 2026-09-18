@@ -1267,12 +1267,25 @@ def generate_qnn_executorch_compiler_spec(  # noqa: C901
             option.htp_options.use_dlbc for option in target_backend_options
         ):
             raise ValueError("FCB reference weight sharing does not support DLBC")
+        htp_arches = {_soc_info_table[model].htp_info.htp_arch for model in soc_models}
+        has_v6x_target = bool(htp_arches & {HtpArch.V68, HtpArch.V69})
+        has_v7x_or_newer_target = bool(
+            htp_arches & {HtpArch.V73, HtpArch.V75, HtpArch.V79, HtpArch.V81}
+        )
+        if has_v6x_target and has_v7x_or_newer_target:
+            warnings.warn(
+                "Combining HTP v6x and v7x-or-newer targets in an FCB may reduce "
+                "weight-sharing effectiveness, increase PTE size, and increase runtime "
+                "memory consumption.",
+                stacklevel=1,
+            )
         if is_qnn_sdk_version_less_than("2.48"):
             raise ValueError(
                 "FCB requires QNN SDK version >= 2.48; "
                 f"current QNN SDK version: {describe_sdk_build_id()}"
             )
 
+    primary_soc_model = soc_models[0]
     backend_options = target_backend_options[0]
     if profile_level and dump_intermediate_outputs:
         warnings.warn(
@@ -1282,7 +1295,7 @@ def generate_qnn_executorch_compiler_spec(  # noqa: C901
         )
 
     qnn_executorch_options = QnnExecuTorchOptions(
-        _soc_info_table[soc_models[0]], backend_options
+        _soc_info_table[primary_soc_model], backend_options
     )
     if is_fcb:
         qnn_executorch_options.target_options = QnnExecuTorchTargetOptions(
@@ -1337,9 +1350,9 @@ def generate_qnn_executorch_compiler_spec(  # noqa: C901
         raise ValueError("LPAI does not support online prepare.")
 
     if backend_options.backend_type == QnnExecuTorchBackendType.kLpaiBackend:
-        if soc_models[0].name not in get_soc_to_lpai_hw_ver_map():
+        if primary_soc_model.name not in get_soc_to_lpai_hw_ver_map():
             raise ValueError(
-                f"Target soc_model({soc_models[0].name}) doesn't support LPAI backend. \n"
+                f"Target soc_model({primary_soc_model.name}) doesn't support LPAI backend. \n"
                 "Please choose the following SOC: "
                 f"{list(get_soc_to_lpai_hw_ver_map().keys())}"
             )
@@ -1349,10 +1362,10 @@ def generate_qnn_executorch_compiler_spec(  # noqa: C901
         # through QNN_SDK_ROOT.
         setup_qnn_sdk()
         if get_soc_to_lpai_hw_ver_map()[
-            soc_models[0].name
+            primary_soc_model.name
         ] == LpaiHardwareVersion.V6 and is_qnn_sdk_version_less_than("2.39"):
             raise ValueError(
-                f"Target soc_model({soc_models[0].name}) with LPAI backend v6 requires QNN SDK version >= 2.39. \n"
+                f"Target soc_model({primary_soc_model.name}) with LPAI backend v6 requires QNN SDK version >= 2.39. \n"
                 f"Current QNN SDK version: {describe_sdk_build_id()}"
             )
 

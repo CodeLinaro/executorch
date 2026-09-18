@@ -1,7 +1,8 @@
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import torch
+from executorch.backends.qualcomm import qnn_preprocess
 from executorch.backends.qualcomm._passes import (
     AnnotateQuantAttrs,
     ConvertBmmToMatmul,
@@ -122,6 +123,41 @@ class TestPasses(unittest.TestCase):
             backend_type=QnnExecuTorchBackendType.kHtpBackend,
         )
         self.assertEqual(ctx_bin, result)
+
+    def test_get_op_wrappers_returns_context_binary_partitions(self):
+        op_name = "ctx_loader_partitions"
+        ctx_bin = b"qnn_context_binary"
+        edge_program, context_loader_nodes = self._build_context_loader_edge_program(
+            op_name, check_ir_validity=False
+        )
+        for node in context_loader_nodes:
+            node.meta[OpContextLoader.meta_ctx_bin] = ctx_bin
+
+        option = MagicMock()
+        option.dump_intermediate_outputs = False
+        option.op_package_options.op_package_infos = []
+        option.use_mha2sha = False
+        option.backend_options.backend_type = QnnExecuTorchBackendType.kHtpBackend
+        result = QnnBackend._get_op_wrappers(option, 1, {"forward": [edge_program]})
+
+        self.assertIsInstance(result, qnn_preprocess._ContextBinaryPartitions)
+        self.assertEqual(result.partitions, [{"forward": ctx_bin}])
+
+    def test_get_op_wrappers_returns_op_wrapper_partitions(self):
+        op_wrapper = MagicMock()
+        qnn_op_wrapper = object()
+        op_wrapper.GetOpWrapper.return_value = qnn_op_wrapper
+        option = MagicMock()
+        option.dump_intermediate_outputs = False
+        option.op_package_options.op_package_infos = []
+        option.use_mha2sha = False
+        option.backend_options.backend_type = QnnExecuTorchBackendType.kHtpBackend
+
+        with patch.object(QnnBackend, "_build_op_wrappers", return_value=[op_wrapper]):
+            result = QnnBackend._get_op_wrappers(option, 1, {"forward": [MagicMock()]})
+
+        self.assertIsInstance(result, qnn_preprocess._OpWrapperPartitions)
+        self.assertEqual(result.partitions, [{"forward": [qnn_op_wrapper]}])
 
     def test_context_loader_op_lowers_with_ir_validation(self):
         op_name = "ctx_loader_validation"

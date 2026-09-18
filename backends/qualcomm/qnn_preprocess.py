@@ -6,7 +6,8 @@
 
 import logging
 from collections import defaultdict
-from typing import Dict, final, List, Literal, Tuple, Union
+from dataclasses import dataclass
+from typing import Dict, final, List
 
 import executorch.backends.qualcomm.python.PyQnnManagerAdaptor as PyQnnManager
 import torch  # noqa: F401
@@ -46,6 +47,20 @@ DEFAULT_GRAPH_NAME = "forward"
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
+
+@dataclass(frozen=True)
+class _ContextBinaryPartitions:
+    """Partitions supplied by context-loader nodes; compilation is bypassed."""
+
+    partitions: List[Dict[str, bytes]]
+
+
+@dataclass(frozen=True)
+class _OpWrapperPartitions:
+    """Partitions that must be compiled into QNN context binaries."""
+
+    partitions: List[Dict[str, List[PyQnnManager.OpWrapper]]]
 
 
 def _check_io_binding(edge_program: ExportedProgram, nodes_to_wrappers) -> None:
@@ -139,7 +154,7 @@ class QnnBackend(BackendDetails):
                         op = unwrap_op_overload(node.target)
                         context_loader_target = eval(
                             f"torch.ops.{OpContextLoader.namespace}.{op.__name__}",
-                            globals().update(torch.__dict__),
+                            {"torch": torch},
                         )
                         assert op == context_loader_target, err_msg
                         # if graph has context binary loader node, return directly
@@ -219,20 +234,14 @@ class QnnBackend(BackendDetails):
         option: QnnExecuTorchOptions,
         num_partitions: int,
         edge_programs: Dict[str, List[ExportedProgram]],
-    ) -> Tuple[
-        Literal["ctx_binary", "op_wrapper"],
-        Union[
-            List[Dict[str, bytes]],
-            List[Dict[str, List[PyQnnManager.OpWrapper]]],
-        ],
-    ]:
-        py_op_wrapper_list, ctx_binary_list = [], []
-        wrapper_type = None
+    ) -> _ContextBinaryPartitions | _OpWrapperPartitions:
+        op_wrapper_partitions, context_binary_partitions = [], []
+        result_type = None
         for i in range(num_partitions):
             subgraph_op_wrapper, subgraph_ctx_binary = {}, {}
             for key, programs in edge_programs.items():
                 logger.info(
-                    f"Extracting OpWrapper for Method({key}): ({i+1}/{num_partitions})"
+                    f"Extracting OpWrapper for Method({key}): ({i + 1}/{num_partitions})"
                 )
                 py_op_wrappers = QnnBackend._build_op_wrappers(
                     programs[i],
@@ -242,33 +251,31 @@ class QnnBackend(BackendDetails):
                     option.backend_options.backend_type,
                 )
                 if isinstance(py_op_wrappers, bytes):
-                    # ensure not mixed
-                    if wrapper_type and wrapper_type != "ctx_binary":
+                    if result_type is _OpWrapperPartitions:
                         raise RuntimeError("Hybrid compilation is not supported")
-                    wrapper_type = "ctx_binary"
+                    result_type = _ContextBinaryPartitions
 
                     subgraph_ctx_binary[key] = py_op_wrappers
                 else:
-                    # ensure not mixed
-                    if wrapper_type and wrapper_type != "op_wrapper":
+                    if result_type is _ContextBinaryPartitions:
                         raise RuntimeError("Hybrid compilation is not supported")
-                    wrapper_type = "op_wrapper"
+                    result_type = _OpWrapperPartitions
 
                     subgraph_op_wrapper[key] = [
                         py_op_wrapper.GetOpWrapper() for py_op_wrapper in py_op_wrappers
                     ]
-            # append
-            match wrapper_type:
-                case "op_wrapper":
-                    py_op_wrapper_list.append(subgraph_op_wrapper)
-                case "ctx_binary":
-                    ctx_binary_list.append(subgraph_ctx_binary)
-                case _:
-                    raise ValueError("Unexpected wrapper_type")
-        return (
-            wrapper_type,
-            py_op_wrapper_list if wrapper_type == "op_wrapper" else ctx_binary_list,
-        )
+            if result_type is _OpWrapperPartitions:
+                op_wrapper_partitions.append(subgraph_op_wrapper)
+            elif result_type is _ContextBinaryPartitions:
+                context_binary_partitions.append(subgraph_ctx_binary)
+            else:
+                raise ValueError("Unexpected preprocessing result")
+
+        if result_type is _OpWrapperPartitions:
+            return _OpWrapperPartitions(op_wrapper_partitions)
+        if result_type is _ContextBinaryPartitions:
+            return _ContextBinaryPartitions(context_binary_partitions)
+        raise ValueError("Unexpected preprocessing result")
 
     @staticmethod
     def _get_compile_func(qnn_manager: PyQnnManager.QnnManager):
@@ -323,10 +330,7 @@ class QnnBackend(BackendDetails):
 
         num_partitions = next(iter(num_partitions))
 
-        # get op_wrapper_list or ctx_binary_list for embedded mode.
-        wrapper_type, op_wrappers = QnnBackend._get_op_wrappers(
-            option, num_partitions, edge_programs
-        )
+        result = QnnBackend._get_op_wrappers(option, num_partitions, edge_programs)
 
         # QNN preprocessing assigns the final QCOM_TENSOR_NAME metadata used as
         # delegate identifiers, so build this mapping only after wrappers exist.
@@ -337,44 +341,41 @@ class QnnBackend(BackendDetails):
             )
 
         all_processed_results = {key: [] for key in edge_programs}
-        match wrapper_type:
-            case "ctx_binary":
-                for i in range(num_partitions):
-                    for key in edge_programs:
-                        all_processed_results[key].append(
-                            PreprocessResult(
-                                processed_bytes=op_wrappers[i][key],
-                                debug_handle_map=debug_handle_builder.get_delegate_mapping(),
-                            )
+        if isinstance(result, _ContextBinaryPartitions):
+            for i in range(num_partitions):
+                for key in edge_programs:
+                    all_processed_results[key].append(
+                        PreprocessResult(
+                            processed_bytes=result.partitions[i][key],
+                            debug_handle_map=debug_handle_builder.get_delegate_mapping(),
                         )
-            case "op_wrapper":
-                if option.target_options is not None:
-                    qnn_managers = [
-                        get_current_qnn_manager(compile_spec, target.soc_info.soc_model)
-                        for target in option.target_options.targets
-                    ]
-                    compile_func = QnnBackend._get_compile_func_fcb(qnn_managers)
-                else:
-                    qnn_manager = get_current_qnn_manager(compile_spec)
-                    compile_func = QnnBackend._get_compile_func(qnn_manager)
-                for i in range(num_partitions):
-                    op_wrapper_list = list(op_wrappers[i].values())
-                    context_binary = compile_func(graph_names, op_wrapper_list)
-                    if option.saver:
-                        # TODO: Currently, only the first method is saved. Update this logic if saving multiple methods becomes necessary in the future.
-                        exit(
-                            f"Record all QNN API calls from saver backend at: {option.saver_output_dir}"
+                    )
+        else:
+            if option.target_options is not None:
+                qnn_managers = [
+                    get_current_qnn_manager(compile_spec, target.soc_info.soc_model)
+                    for target in option.target_options.targets
+                ]
+                compile_func = QnnBackend._get_compile_func_fcb(qnn_managers)
+            else:
+                qnn_manager = get_current_qnn_manager(compile_spec)
+                compile_func = QnnBackend._get_compile_func(qnn_manager)
+            for i in range(num_partitions):
+                op_wrapper_list = list(result.partitions[i].values())
+                context_binary = compile_func(graph_names, op_wrapper_list)
+                if option.saver:
+                    # TODO: Currently, only the first method is saved. Update this logic if saving multiple methods becomes necessary in the future.
+                    exit(
+                        f"Record all QNN API calls from saver backend at: {option.saver_output_dir}"
+                    )
+                assert (
+                    len(context_binary) != 0
+                ), "Failed to generate Qnn context binary."
+                for key in edge_programs:
+                    all_processed_results[key].append(
+                        PreprocessResult(
+                            processed_bytes=context_binary,
+                            debug_handle_map=debug_handle_builder.get_delegate_mapping(),
                         )
-                    assert (
-                        len(context_binary) != 0
-                    ), "Failed to generate Qnn context binary."
-                    for key in edge_programs:
-                        all_processed_results[key].append(
-                            PreprocessResult(
-                                processed_bytes=context_binary,
-                                debug_handle_map=debug_handle_builder.get_delegate_mapping(),
-                            )
-                        )
-            case _:
-                raise ValueError("Unexpected wrapper type")
+                    )
         return all_processed_results

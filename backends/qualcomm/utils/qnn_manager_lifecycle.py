@@ -72,13 +72,13 @@ def _get_target_option(
                     "current multi-SoC execution requires exactly one backend option "
                     f"per target; {soc_model.name} has {len(target.backend_options)}"
                 )
-            target_options = copy.deepcopy(python_options)
-            target_options.soc_info = target.soc_info
-            target_options.backend_options = target.backend_options[0]
+            single_target_options = copy.deepcopy(python_options)
+            single_target_options.soc_info = target.soc_info
+            single_target_options.backend_options = target.backend_options[0]
             return (
-                target_options.backend_options.backend_type,
+                single_target_options.backend_options.backend_type,
                 soc_model,
-                option_to_flatbuffer(target_options),
+                option_to_flatbuffer(single_target_options),
             )
     if soc_model is None:
         raise ValueError("FCB manager lookup requires soc_model")

@@ -75,7 +75,7 @@ class QnnBackendCache {
 
  private:
   executorch::runtime::Error GetQnnGraphInfoFromBinary(
-      void* buffer,
+      const void* buffer,
       uint32_t nbytes);
   executorch::runtime::Error GetQnnGraphInfoFromDlc();
 
