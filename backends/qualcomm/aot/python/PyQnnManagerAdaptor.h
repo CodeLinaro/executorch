@@ -303,7 +303,9 @@ class PyQnnManager {
 
   // TODO: address the DLC handle life cycle
   void FreeDlc(uintptr_t dlc_handle) {
-    qnn_manager_->FreeDlc(reinterpret_cast<void*>(dlc_handle));
+    if (dlc_handle != 0) {
+      qnn_manager_->FreeDlc(reinterpret_cast<void*>(dlc_handle));
+    }
   }
 
   void Destroy() {

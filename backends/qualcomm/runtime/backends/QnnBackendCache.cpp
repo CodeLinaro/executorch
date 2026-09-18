@@ -17,7 +17,7 @@ namespace qnn {
 using executorch::runtime::Error;
 
 Error QnnBackendCache::GetQnnGraphInfoFromBinary(
-    void* buffer,
+    const void* buffer,
     uint32_t nbytes) {
   const QnnSystemInterface& qnn_sys_interface =
       qnn_sys_impl_->GetQnnSystemInterface();
@@ -119,8 +119,7 @@ Error QnnBackendCache::GetQnnGraphInfoFromDlc() {
     return Error::Internal;
   }
   return GetQnnGraphInfoFromBinary(
-      const_cast<uint8_t*>(context_binary),
-      static_cast<uint32_t>(context_binary_size));
+      context_binary, static_cast<uint32_t>(context_binary_size));
 #else
   QNN_EXECUTORCH_LOG_ERROR(
       "FCB is not supported by this QNN SDK; Compilation with QAIRT SDK 2.48 or newer is required.");
@@ -165,8 +164,7 @@ Error QnnBackendCache::Configure(const std::vector<std::string>& graph_names) {
 
   status = is_fcb_ ? GetQnnGraphInfoFromDlc()
                    : GetQnnGraphInfoFromBinary(
-                         static_cast<uint8_t*>(qnn_context_blob_.buffer),
-                         qnn_context_blob_.nbytes);
+                         qnn_context_blob_.buffer, qnn_context_blob_.nbytes);
 
   if (status != Error::Ok && is_fcb_) {
     QNN_EXECUTORCH_LOG_ERROR("Failed to get Graph Info from input FCB DLC");

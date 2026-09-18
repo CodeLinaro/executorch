@@ -16,7 +16,7 @@ class HtpBackendCache : public QnnBackendCache {
   explicit HtpBackendCache(
       const QnnExecuTorchContextBinary& qnn_context_blob,
       QnnSystemImplementation* qnn_sys_impl,
-      bool is_fcb)
+      bool is_fcb = false)
       : QnnBackendCache(qnn_context_blob, qnn_sys_impl, is_fcb),
         spill_fill_buf_(0) {}
   ~HtpBackendCache() override = default;

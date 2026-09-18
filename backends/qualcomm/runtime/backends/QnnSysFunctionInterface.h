@@ -63,9 +63,6 @@ class QnnSystemInterface {
       system_dlc_get_records_by_type,
       systemDlcGetRecordsByType);
   DEFINE_SHIM_FUNCTION_SYS_INTERFACE(
-      system_dlc_get_record_data_size,
-      systemDlcGetRecordDataSize);
-  DEFINE_SHIM_FUNCTION_SYS_INTERFACE(
       system_dlc_read_record_data_memory_mapped,
       systemDlcReadRecordDataMemoryMapped);
 #endif

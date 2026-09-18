@@ -316,8 +316,17 @@ Error QnnManager::GetDlcBinary(void* dlc_handle, std::vector<uint8_t>& binary) {
 }
 
 void QnnManager::FreeDlc(void* dlc_handle) {
-  backend_bundle_ptr_->system_implementation->GetQnnSystemInterface()
-      .qnn_system_dlc_free(dlc_handle);
+  if (dlc_handle == nullptr) {
+    return;
+  }
+  const QnnSystemInterface& qnn_sys_interface =
+      backend_bundle_ptr_->system_implementation->GetQnnSystemInterface();
+  const Qnn_ErrorHandle_t error =
+      qnn_sys_interface.qnn_system_dlc_free(dlc_handle);
+  if (error != QNN_SUCCESS) {
+    QNN_EXECUTORCH_LOG_WARN(
+        "Failed to free DLC handle. Error %d.", QNN_GET_ERROR_CODE(error));
+  }
 }
 
 Error QnnManager::InitBackend() {
