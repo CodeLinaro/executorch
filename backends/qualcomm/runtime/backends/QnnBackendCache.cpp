@@ -10,6 +10,7 @@
 #include <executorch/backends/qualcomm/runtime/backends/QnnCustomProtocol.h>
 #include <executorch/backends/qualcomm/runtime/backends/QnnSdkCompatibility.h>
 
+
 namespace executorch {
 namespace backends {
 namespace qnn {
@@ -93,20 +94,19 @@ Error QnnBackendCache::GetQnnGraphInfoFromDlc() {
       &fcb_dlc_handle_);
   if (error != QNN_SUCCESS) {
     QNN_EXECUTORCH_LOG_ERROR(
-        "[FCB] class=MalformedDlc error=%d", QNN_GET_ERROR_CODE(error));
+        "Failed to create dlc from binary error=%d", QNN_GET_ERROR_CODE(error));
     return Error::Internal;
   }
+  const uint8_t get_most_optimal_context_binary = 1;
   error = qnn_sys_interface.qnn_system_dlc_get_records_by_type(
       fcb_dlc_handle_,
       QNN_SYSTEM_DLC_RECORD_PREFIX_HTP_CACHE_RECORD,
-      1,
+      get_most_optimal_context_binary,
       &records,
       &count);
   if (error != QNN_SUCCESS || count != 1) {
     QNN_EXECUTORCH_LOG_ERROR(
-        "[FCB] class=OffListSoc records=%u error=%d",
-        count,
-        QNN_GET_ERROR_CODE(error));
+        "Failed to read record data. Error %d", QNN_GET_ERROR_CODE(error));
     return Error::Internal;
   }
   const uint8_t* context_binary = nullptr;
@@ -178,20 +178,22 @@ Error QnnBackendCache::Configure(const std::vector<std::string>& graph_names) {
 }
 
 QnnBackendCache::~QnnBackendCache() {
+  Qnn_ErrorHandle_t error = QNN_SUCCESS;
   if (fcb_dlc_handle_ != nullptr) {
     const QnnSystemInterface& qnn_sys_interface =
         qnn_sys_impl_->GetQnnSystemInterface();
-    if (qnn_sys_interface.qnn_system_dlc_free(fcb_dlc_handle_) != QNN_SUCCESS) {
-      QNN_EXECUTORCH_LOG_WARN("[FCB] Failed to free DLC handle.");
+    error = qnn_sys_interface.qnn_system_dlc_free(fcb_dlc_handle_);
+    if (error != QNN_SUCCESS) {
+      QNN_EXECUTORCH_LOG_WARN("Failed to free DLC handle. Error %d", QNN_GET_ERROR_CODE(error));
     }
     fcb_dlc_handle_ = nullptr;
   }
   if (sys_context_handle_ != nullptr) {
     const QnnSystemInterface& qnn_sys_interface =
         qnn_sys_impl_->GetQnnSystemInterface();
-    if (qnn_sys_interface.qnn_system_context_free(sys_context_handle_) !=
-        QNN_SUCCESS) {
-      QNN_EXECUTORCH_LOG_WARN("Failed to free QNN system context.");
+    error = qnn_sys_interface.qnn_system_context_free(sys_context_handle_);
+    if (error != QNN_SUCCESS) {
+      QNN_EXECUTORCH_LOG_WARN("Failed to free QNN system context. Error %d", QNN_GET_ERROR_CODE(error));
     }
     sys_context_handle_ = nullptr;
   }
