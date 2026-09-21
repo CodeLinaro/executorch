@@ -393,11 +393,11 @@ class QnnQuantizer(Quantizer):
             raise ValueError(
                 "multiple soc_model (FCB) is only supported for HTP backend"
             )
-        least_soc_model = min(
+        least_capable_soc_model = min(
             self.soc_models,
             key=lambda model: _soc_info_table[model].htp_info.htp_arch,
         )
-        self.soc_info = _soc_info_table[least_soc_model]
+        self.soc_info = _soc_info_table[least_capable_soc_model]
 
         # Lazy load rules and constraints of current backend
         self._rules_map, self._constraint_cache = load_backend_rules_and_constraints(
@@ -412,7 +412,7 @@ class QnnQuantizer(Quantizer):
         disable_mkldnn_on_amd()
 
         # Validate against the least capable FCB target.
-        self.backend_opinfo = get_backend_opinfo(str(backend), least_soc_model)
+        self.backend_opinfo = get_backend_opinfo(str(backend), least_capable_soc_model)
 
         self.default_quant_config = ModuleQConfig()
         self.submodule_qconfig_list: List[
