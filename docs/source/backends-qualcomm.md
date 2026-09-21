@@ -221,7 +221,8 @@ an end-to-end real-model example, including optional ADB execution and output
 comparison, run:
 
 ```bash
-python -m examples.qualcomm.util_scripts.fcb_resnet50 \
+python -m examples.qualcomm.util_scripts.fcb \
+  --model resnet50 \
   --soc_models SM8650 SM8750 \
   --devices <device-on-SM8650> <device-on-SM8750> \
   --build_folder build-android
@@ -269,10 +270,22 @@ compiler_specs = generate_qnn_executorch_compiler_spec(
 An end-to-end ResNet50 example uses this flow:
 
 ```bash
-python -m examples.qualcomm.util_scripts.fcb_resnet50_quantized \
+python -m examples.qualcomm.util_scripts.fcb \
+  --model resnet50_quantized \
   --soc_models SM8550 SM8750 \
   --dataset /path/to/imagenet-mini-val/val \
   --devices <device-on-SM8550> <device-on-SM8750> \
+  --build_folder build-android
+```
+
+The same entry point can compare FCB reference-weight sharing and multi-graph
+weight sharing:
+
+```bash
+python -m examples.qualcomm.util_scripts.fcb \
+  --model weight_sharing \
+  --soc_models SM8650 SM8750 \
+  --devices <device-on-SM8650> <device-on-SM8750> \
   --build_folder build-android
 ```
 

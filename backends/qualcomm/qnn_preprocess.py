@@ -6,7 +6,6 @@
 
 import logging
 from collections import defaultdict
-from dataclasses import dataclass
 from typing import Dict, final, List
 
 import executorch.backends.qualcomm.python.PyQnnManagerAdaptor as PyQnnManager
@@ -20,7 +19,6 @@ from executorch.backends.qualcomm.partition.utils import generate_qnn_executorch
 from executorch.backends.qualcomm.serialization.qc_schema import (
     QnnExecuTorchBackendType,
     QnnExecuTorchOpPackageInfo,
-    QnnExecuTorchOptions,
 )
 from executorch.backends.qualcomm.serialization.qc_schema_serialize import (
     flatbuffer_to_option,
@@ -47,6 +45,7 @@ DEFAULT_GRAPH_NAME = "forward"
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
 
 def _check_io_binding(edge_program: ExportedProgram, nodes_to_wrappers) -> None:
     """Fail here if QNN's graph I/O will not line up with the delegate signature.
@@ -280,21 +279,23 @@ class QnnBackend(BackendDetails):
         all_processed_results = {key: [] for key in edge_programs}
         for i in range(num_partitions):
             method_to_ith_partition_wrapper = {
-                key: py_op_wrappers = QnnBackend._build_op_wrappers(
+                key: QnnBackend._build_op_wrappers(
                     programs[i],
                     option.dump_intermediate_outputs,
                     option.op_package_options.op_package_infos,
                     option.use_mha2sha,
                     option.backend_options.backend_type,
                 )
-                for key, program in edge_programs.items()
+                for key, programs in edge_programs.items()
             }
 
             # QNN preprocessing assigns the final QCOM_TENSOR_NAME metadata used as
             # delegate identifiers, so build this mapping only after wrappers exist.
             if option.dump_intermediate_outputs:
-                for edge_program in edge_programs.values()
-                    QnnBackend._populate_delegate_mapping(debug_handle_builder, edge_program[i])
+                for edge_program in edge_programs.values():
+                    QnnBackend._populate_delegate_mapping(
+                        debug_handle_builder, edge_program[i]
+                    )
 
             # ensure not mixed
             wrapper_types = set(map(type, method_to_ith_partition_wrapper.values()))
@@ -310,8 +311,12 @@ class QnnBackend(BackendDetails):
                             debug_handle_map=debug_handle_builder.get_delegate_mapping(),
                         )
                     )
-            elif wrapper_type == PyQnnManager.OpWrapper:
-                op_wrapper_list = list(method_to_ith_partition_wrapper.values())
+            elif wrapper_type == list:
+                # List[PyQnnManager.PyQnnOpWrapper]
+                op_wrapper_list = [
+                    [wrapper.GetOpWrapper() for wrapper in wrappers]
+                    for wrappers in method_to_ith_partition_wrapper.values()
+                ]
                 context_binary = compile_func(graph_names, op_wrapper_list)
                 if option.saver:
                     # TODO: Currently, only the first method is saved. Update this logic if saving multiple methods becomes necessary in the future.
@@ -329,5 +334,7 @@ class QnnBackend(BackendDetails):
                         )
                     )
             else:
-                raise ValueError("Unexpected preprocessing op wrapper type")
-       return all_processed_results
+                raise ValueError(
+                    f"Unexpected preprocessing op wrapper type {wrapper_type}"
+                )
+        return all_processed_results
