@@ -10,7 +10,6 @@
 #include <executorch/backends/qualcomm/runtime/backends/QnnCustomProtocol.h>
 #include <executorch/backends/qualcomm/runtime/backends/QnnSdkCompatibility.h>
 
-
 namespace executorch {
 namespace backends {
 namespace qnn {
@@ -184,7 +183,8 @@ QnnBackendCache::~QnnBackendCache() {
         qnn_sys_impl_->GetQnnSystemInterface();
     error = qnn_sys_interface.qnn_system_dlc_free(fcb_dlc_handle_);
     if (error != QNN_SUCCESS) {
-      QNN_EXECUTORCH_LOG_WARN("Failed to free DLC handle. Error %d", QNN_GET_ERROR_CODE(error));
+      QNN_EXECUTORCH_LOG_WARN(
+          "Failed to free DLC handle. Error %d", QNN_GET_ERROR_CODE(error));
     }
     fcb_dlc_handle_ = nullptr;
   }
@@ -193,7 +193,9 @@ QnnBackendCache::~QnnBackendCache() {
         qnn_sys_impl_->GetQnnSystemInterface();
     error = qnn_sys_interface.qnn_system_context_free(sys_context_handle_);
     if (error != QNN_SUCCESS) {
-      QNN_EXECUTORCH_LOG_WARN("Failed to free QNN system context. Error %d", QNN_GET_ERROR_CODE(error));
+      QNN_EXECUTORCH_LOG_WARN(
+          "Failed to free QNN system context. Error %d",
+          QNN_GET_ERROR_CODE(error));
     }
     sys_context_handle_ = nullptr;
   }

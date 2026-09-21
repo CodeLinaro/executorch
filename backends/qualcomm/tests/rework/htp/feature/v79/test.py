@@ -3,11 +3,13 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+
 from contextlib import nullcontext
 
 import pytest
 
 from executorch.backends.qualcomm.tests.rework.conftest import Tolerance
+from executorch.backends.qualcomm.tests.rework.src.fcb import Fcb
 from executorch.backends.qualcomm.tests.rework.src.feature import *  # noqa: F403
 
 
@@ -109,8 +111,6 @@ def test_spill_fill(request, kwargs):
 )
 def test_tensor_dump(request, kwargs):
     TensorDump.test(request, kwargs)  # noqa: F405
-
-from executorch.backends.qualcomm.tests.rework.src.fcb import Fcb
 
 
 def test_fcb_compiler_spec_preserves_targets(fcb_compile_specs):
