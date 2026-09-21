@@ -121,6 +121,10 @@ def test_fcb_manager_cache_is_keyed_by_soc(monkeypatch):
     Fcb.manager_cache_is_keyed_by_soc(monkeypatch)
 
 
+def test_fcb_dlc_handle_enforces_lifetime_and_owner(fcb_compile_specs):
+    Fcb.dlc_handle_enforces_lifetime_and_owner(fcb_compile_specs)
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [

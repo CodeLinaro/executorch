@@ -78,6 +78,28 @@ class Fcb:
         assert first is third
 
     @staticmethod
+    def dlc_handle_enforces_lifetime_and_owner(fcb_compile_specs):
+        soc_models = (QcomChipset.SM8650, QcomChipset.SM8750)
+        compile_specs = fcb_compile_specs(soc_models)
+
+        with lifecycle.QnnManagerContext({"forward": compile_specs}):
+            owner = lifecycle.get_current_qnn_manager(compile_specs, QcomChipset.SM8650)
+            other = lifecycle.get_current_qnn_manager(compile_specs, QcomChipset.SM8750)
+            assert not hasattr(owner, "FreeDlc")
+            with pytest.raises(TypeError):
+                owner.GetDlcBinary(0)
+
+            handle = owner.CreateDlc()
+            with pytest.raises(RuntimeError, match="test exception"):
+                with handle:
+                    with pytest.raises(RuntimeError, match="creating manager"):
+                        other.GetDlcBinary(handle)
+                    raise RuntimeError("test exception")
+
+            with pytest.raises(RuntimeError, match="already been freed"):
+                owner.GetDlcBinary(handle)
+
+    @staticmethod
     @unpack_fixtures
     def e2e(qnn_config, fcb_compile_specs, expected):
         if qnn_config.build_folder == "build-x86":

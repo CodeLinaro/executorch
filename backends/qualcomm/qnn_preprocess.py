@@ -225,8 +225,7 @@ class QnnBackend(BackendDetails):
     @staticmethod
     def _get_compile_func_fcb(qnn_managers: List[PyQnnManager.QnnManager]):
         def compile_func(graph_names, op_wrapper_list):
-            dlc_handle = qnn_managers[0].CreateDlc()
-            try:
+            with qnn_managers[0].CreateDlc() as dlc_handle:
                 for qnn_manager in qnn_managers:
                     qnn_manager.InitContext(graph_names)
                     try:
@@ -236,8 +235,6 @@ class QnnBackend(BackendDetails):
                     finally:
                         qnn_manager.DestroyContext()
                 dlc_binary = bytes(qnn_managers[0].GetDlcBinary(dlc_handle))
-            finally:
-                qnn_managers[0].FreeDlc(dlc_handle)
             return dlc_binary
 
         return compile_func
